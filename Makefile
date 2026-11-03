@@ -6,13 +6,13 @@ PYTHON ?= $(if $(wildcard .venv/bin/python),.venv/bin/python,python3)
 
 # N=5 usa o compose.yaml versionado; outros N geram um compose em .run/.
 # Os demais alvos usam o último gerado (se existir) até o `make down`.
-RUN_COMPOSE := .run/compose.yaml
+RUN_COMPOSE ?= .run/compose.yaml
 UP_FILE := $(if $(filter 5,$(N)),compose.yaml,$(RUN_COMPOSE))
 CUR_FILE = $(if $(wildcard $(RUN_COMPOSE)),$(RUN_COMPOSE),compose.yaml)
 COMPOSE = docker compose --project-directory . -f
 
 .DEFAULT_GOAL := help
-.PHONY: help install test build up ps logs logs-f down compose
+.PHONY: help install test test-e2e build up ps logs logs-f down compose
 
 help: ## lista os alvos
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-10s %s\n", $$1, $$2}'
@@ -23,6 +23,9 @@ install: ## cria .venv e instala o pacote com dependências de dev e análise
 
 test: ## testes automatizados (simulador + transporte em localhost)
 	$(PYTHON) -m pytest
+
+test-e2e: ## testes de ponta a ponta com Docker (projeto isolado mc714-e2e)
+	$(PYTHON) -m pytest -m docker
 
 build: ## constrói a imagem do nó
 	$(COMPOSE) compose.yaml build

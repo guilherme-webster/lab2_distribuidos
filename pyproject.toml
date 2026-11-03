@@ -20,3 +20,6 @@ where = ["src"]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+# Testes com Docker são lentos: ficam fora do padrão e rodam com `make test-e2e`
+markers = ["docker: sobe contêineres de verdade (make test-e2e)"]
+addopts = "-m 'not docker'"

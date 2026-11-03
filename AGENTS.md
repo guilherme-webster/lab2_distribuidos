@@ -24,6 +24,7 @@ Mantenha esta lista atualizada (`make help` lista os alvos existentes).
 ```
 make install       # cria .venv e instala o pacote (dev + análise)
 make test          # testes automatizados (simulador + transporte em localhost)
+make test-e2e      # ponta a ponta com Docker, em projeto isolado (mc714-e2e)
 make build         # constrói a imagem
 make up N=5        # sobe N nós (N=5 usa o compose.yaml; outros N geram .run/compose.yaml)
 make ps            # estado dos contêineres
