@@ -19,16 +19,23 @@ Cada nó é um contêiner independente orquestrado por Docker Compose v2 (`compo
 
 ## Comandos
 
-(serão criados na fase de fundação — mantenha esta lista atualizada)
+Mantenha esta lista atualizada (`make help` lista os alvos existentes).
 
 ```
+make install       # cria .venv e instala o pacote (dev + análise)
+make test          # testes automatizados (simulador + transporte em localhost)
 make build         # constrói a imagem
-make up N=5        # gera compose para N nós e sobe o ambiente
-make logs          # logs JSON de todos os nós
-make test          # testes unitários (simulador determinístico)
+make up N=5        # sobe N nós (N=5 usa o compose.yaml; outros N geram .run/compose.yaml)
+make ps            # estado dos contêineres
+make logs          # logs JSON de todos os nós, ordenados por ts
+make logs-f        # acompanha os logs ao vivo
 make down          # remove todo o ambiente
-make experiments   # roda todos os experimentos e grava em experiments/raw/
+make compose       # regenera o compose.yaml versionado
+make experiments   # (a fazer) roda os experimentos e grava em experiments/raw/
 ```
+
+Parâmetros dos algoritmos e da injeção de falhas vão pelo ambiente do host:
+`DROP_RATE=0.1 SEED=3 make up N=7`.
 
 ## Commits: pequenos, modulares e funcionais
 

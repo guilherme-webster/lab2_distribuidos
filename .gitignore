@@ -20,3 +20,5 @@ htmlcov/
 .DS_Store
 
 Pipfile
+# Compose gerado por `make up N=...`
+.run/
