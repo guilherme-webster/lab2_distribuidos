@@ -23,17 +23,24 @@ def free_ports(n: int) -> list[int]:
     return ports
 
 
-@pytest.fixture
-async def pair():
+async def make_pair(**sender_cfg):
+    """Nós 1 e 2 em localhost; sender_cfg configura falhas no nó 1."""
     p1, p2 = free_ports(2)
     addrs = {1: ("127.0.0.1", p1), 2: ("localhost", p2)}
     nodes = []
     for node_id in (1, 2):
         peers = {k: v for k, v in addrs.items() if k != node_id}
-        cfg = Config(node_id=node_id, peers=peers, host="127.0.0.1", port=addrs[node_id][1])
+        extra = sender_cfg if node_id == 1 else {}
+        cfg = Config(node_id=node_id, peers=peers, host="127.0.0.1", port=addrs[node_id][1], **extra)
         t = UdpTransport(cfg, MemoryLog(node_id))
         await t.start()
         nodes.append(t)
+    return nodes
+
+
+@pytest.fixture
+async def pair():
+    nodes = await make_pair()
     yield nodes
     for t in nodes:
         t.close()
@@ -126,5 +133,91 @@ async def test_unresolvable_peer_is_dropped_not_raised():
         await t.send(2, MessageFactory(1).new("PING", 2))
     finally:
         t.close()
+    assert len(t.log.events("msg_send")) == 1
     assert [r["reason"] for r in t.log.events("msg_drop")] == ["resolve"]
-    assert t.log.events("msg_send") == []
+
+
+# --- injeção de falhas -----------------------------------------------------
+
+async def drain(inbox: asyncio.Queue, quiet: float = 0.1) -> list:
+    """Coleta mensagens até a fila ficar quieta por `quiet` segundos."""
+    got = []
+    while True:
+        try:
+            got.append(await asyncio.wait_for(inbox.get(), quiet))
+        except TimeoutError:
+            return got
+
+
+async def send_burst(drop_rate: float, seed: int, n: int = 100):
+    t1, t2 = await make_pair(drop_rate=drop_rate, seed=seed)
+    try:
+        inbox = inbox_for(t2)
+        f = MessageFactory(1)
+        for _ in range(n):
+            await t1.send(2, f.new("PING", 2))
+        received = {m.msg_id for m in await drain(inbox)}
+        dropped = {r["msg_id"] for r in t1.log.events("msg_drop")}
+        assert len(t1.log.events("msg_send")) == n
+        assert all(r["reason"] == "loss" for r in t1.log.events("msg_drop"))
+        return received, dropped
+    finally:
+        t1.close()
+        t2.close()
+
+
+async def test_drop_rate_extremes():
+    received, dropped = await send_burst(drop_rate=1.0, seed=0, n=20)
+    assert received == set() and len(dropped) == 20
+    received, dropped = await send_burst(drop_rate=0.0, seed=0, n=20)
+    assert len(received) == 20 and dropped == set()
+
+
+async def test_loss_is_reproducible_with_same_seed():
+    recv_a, drop_a = await send_burst(drop_rate=0.3, seed=42)
+    recv_b, drop_b = await send_burst(drop_rate=0.3, seed=42)
+    _, drop_c = await send_burst(drop_rate=0.3, seed=43)
+    assert drop_a == drop_b and drop_a != drop_c
+    assert recv_a == recv_b  # em localhost não há perda real
+    assert 15 < len(drop_a) < 45
+
+
+async def test_delay_and_jitter_postpone_delivery():
+    t1, t2 = await make_pair(delay_ms=100, jitter_ms=50)
+    try:
+        inbox = inbox_for(t2)
+        loop = asyncio.get_running_loop()
+        start = loop.time()
+        await t1.send(2, MessageFactory(1).new("PING", 2))
+        assert len(t1.log.events("msg_send")) == 1  # registrado na hora do envio
+        await asyncio.wait_for(inbox.get(), WAIT)
+        assert 0.1 <= loop.time() - start < 0.4
+    finally:
+        t1.close()
+        t2.close()
+
+
+async def test_close_cancels_delayed_sends():
+    t1, t2 = await make_pair(delay_ms=200)
+    try:
+        inbox = inbox_for(t2)
+        await t1.send(2, MessageFactory(1).new("PING", 2))
+        t1.close()
+        assert await drain(inbox, quiet=0.3) == []
+    finally:
+        t2.close()
+
+
+async def test_block_and_unblock(pair):
+    t1, t2 = pair
+    inbox = inbox_for(t2)
+    f = MessageFactory(1)
+
+    t1.block(2)
+    await t1.send(2, f.new("PING", 2))
+    assert [r["reason"] for r in t1.log.events("msg_drop")] == ["partition"]
+
+    t1.unblock()
+    await t1.send(2, f.new("PING", 2))
+    assert len(await drain(inbox)) == 1
+    assert [r["peers"] for r in t1.log.events("block")] == [[2], []]
