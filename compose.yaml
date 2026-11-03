@@ -1,0 +1,53 @@
+# Gerado por scripts/gen_compose.py 5 -- não edite à mão
+name: mc714
+
+x-node: &node
+  image: mc714-dsnode:dev
+  build: .
+  init: true
+  restart: "no"
+  stop_grace_period: 2s
+
+x-env: &env
+  PEERS: "1=node1:9000,2=node2:9000,3=node3:9000,4=node4:9000,5=node5:9000"
+  PORT: "9000"
+  HB_INTERVAL_MS: "${HB_INTERVAL_MS:-200}"
+  HB_TIMEOUT_MS: "${HB_TIMEOUT_MS:-600}"
+  ELECTION_TIMEOUT_MS: "${ELECTION_TIMEOUT_MS:-500}"
+  COORD_TIMEOUT_MS: "${COORD_TIMEOUT_MS:-1000}"
+  DROP_RATE: "${DROP_RATE:-0.0}"
+  DELAY_MS: "${DELAY_MS:-0}"
+  JITTER_MS: "${JITTER_MS:-0}"
+  SEED: "${SEED:-0}"
+
+services:
+  node1:
+    <<: *node
+    hostname: node1
+    environment:
+      <<: *env
+      NODE_ID: "1"
+  node2:
+    <<: *node
+    hostname: node2
+    environment:
+      <<: *env
+      NODE_ID: "2"
+  node3:
+    <<: *node
+    hostname: node3
+    environment:
+      <<: *env
+      NODE_ID: "3"
+  node4:
+    <<: *node
+    hostname: node4
+    environment:
+      <<: *env
+      NODE_ID: "4"
+  node5:
+    <<: *node
+    hostname: node5
+    environment:
+      <<: *env
+      NODE_ID: "5"
