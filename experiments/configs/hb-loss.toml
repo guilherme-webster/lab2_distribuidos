@@ -1,0 +1,38 @@
+# Precisão sob perda de mensagens, com timeout fixo e adaptativo, e o custo
+# do adaptativo: o crash no fim do ensaio é detectado com o timeout já aumentado.
+name = "hb-loss"
+description = "Falsas suspeitas e latência de detecção vs. perda, timeout fixo × adaptativo"
+algorithm = "heartbeat"
+seeds = 10
+warmup_s = 5
+duration_s = 40
+
+[base]
+N = 5
+HB_INTERVAL_MS = 200
+HB_TIMEOUT_MS = 600
+
+[sweep]
+DROP_RATE = [0.0, 0.05, 0.1, 0.2]
+HB_ADAPTIVE = [false, true]
+
+[[faults]]
+at_s = 34
+action = "kill"
+target = "max"
+
+[[plots]]
+metric = "false_suspicion_rate"
+x = "DROP_RATE"
+series = "HB_ADAPTIVE"
+series_labels = { false = "fixo", true = "adaptativo" }
+xlabel = "Taxa de perda"
+ylabel = "Falsas suspeitas por par·min"
+
+[[plots]]
+metric = "detection_latency_s"
+x = "DROP_RATE"
+series = "HB_ADAPTIVE"
+series_labels = { false = "fixo", true = "adaptativo" }
+xlabel = "Taxa de perda"
+ylabel = "Latência de detecção (s)"

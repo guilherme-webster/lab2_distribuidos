@@ -1,0 +1,42 @@
+# Tempo de detecção de crash em função do timeout do detector.
+# Esperado: latência ≈ timeout - fase do último heartbeat ∈ (timeout - intervalo, timeout].
+name = "hb-timeout"
+description = "Latência de detecção de crash vs. HB_TIMEOUT_MS (2×, 3× e 5× o intervalo)"
+algorithm = "heartbeat"
+seeds = 10
+warmup_s = 5
+duration_s = 28
+
+[base]
+N = 5
+HB_INTERVAL_MS = 200
+
+[sweep]
+HB_TIMEOUT_MS = [400, 600, 1000]
+
+# Duas quedas por ensaio (nó 5 e nó 1), cada uma vista por 4 observadores
+[[faults]]
+at_s = 4
+action = "kill"
+target = "max"
+
+[[faults]]
+at_s = 11
+action = "start"
+target = "max"
+
+[[faults]]
+at_s = 18
+action = "kill"
+target = 1
+
+[[faults]]
+at_s = 25
+action = "start"
+target = 1
+
+[[plots]]
+metric = "detection_latency_s"
+x = "HB_TIMEOUT_MS"
+xlabel = "Timeout do detector (ms)"
+ylabel = "Latência de detecção (s)"
