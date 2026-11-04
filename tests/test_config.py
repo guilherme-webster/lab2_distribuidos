@@ -79,3 +79,30 @@ def test_config_is_immutable():
     cfg = Config(node_id=1)
     with pytest.raises(AttributeError):
         cfg.node_id = 2
+
+
+def test_adaptive_timeout_settings():
+    cfg = Config.from_env({"NODE_ID": "1"})
+    assert (cfg.hb_adaptive, cfg.hb_timeout_step_ms, cfg.hb_timeout_max_ms) == (False, 200, 0)
+    cfg = Config.from_env({
+        "NODE_ID": "1", "HB_ADAPTIVE": "true", "HB_TIMEOUT_STEP_MS": "100", "HB_TIMEOUT_MAX_MS": "2000",
+    })
+    assert (cfg.hb_adaptive, cfg.hb_timeout_step_ms, cfg.hb_timeout_max_ms) == (True, 100, 2000)
+
+
+@pytest.mark.parametrize("raw, expected", [
+    ("1", True), ("true", True), ("YES", True), ("on", True),
+    ("0", False), ("false", False), ("No", False), ("off", False), ("", False),
+])
+def test_parse_bool(raw, expected):
+    assert Config.from_env({"NODE_ID": "1", "HB_ADAPTIVE": raw}).hb_adaptive is expected
+
+
+@pytest.mark.parametrize("env", [
+    {"HB_ADAPTIVE": "talvez"},
+    {"HB_TIMEOUT_STEP_MS": "0"},
+    {"HB_TIMEOUT_MAX_MS": "500"},  # menor que HB_TIMEOUT_MS (600)
+])
+def test_adaptive_settings_rejected(env):
+    with pytest.raises(ConfigError):
+        Config.from_env({"NODE_ID": "1", **env})

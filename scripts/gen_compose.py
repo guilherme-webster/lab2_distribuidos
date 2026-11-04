@@ -19,6 +19,9 @@ IMAGE = "mc714-dsnode:dev"
 TUNABLES = {
     "HB_INTERVAL_MS": "200",
     "HB_TIMEOUT_MS": "600",
+    "HB_ADAPTIVE": "false",
+    "HB_TIMEOUT_STEP_MS": "200",
+    "HB_TIMEOUT_MAX_MS": "0",
     "ELECTION_TIMEOUT_MS": "500",
     "COORD_TIMEOUT_MS": "1000",
     "DROP_RATE": "0.0",

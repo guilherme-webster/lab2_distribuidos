@@ -1,16 +1,24 @@
-"""Detector de falhas por heartbeat (all-to-all, timeout fixo).
+"""Detector de falhas por heartbeat (all-to-all, timeout fixo ou adaptativo).
 
 A cada hb_interval_ms o nó envia HEARTBEAT a todos os peers. Cada peer tem um
-timer de hb_timeout_ms reiniciado a cada heartbeat novo; se ele estourar, o
-peer passa a ser suspeito (evento `suspect`). Um heartbeat de um suspeito o
+timer de timeout reiniciado a cada heartbeat novo; se ele estourar, o peer
+passa a ser suspeito (evento `suspect`). Um heartbeat de um suspeito o
 restaura (evento `restore`).
+
+Um restore com a mesma encarnação é uma falsa suspeita (o peer nunca caiu);
+com encarnação nova, o peer de fato reiniciou. Com hb_adaptive, cada falsa
+suspeita soma hb_timeout_step_ms ao timeout daquele peer.
 
 Propriedades (sob sincronia parcial, canais com perda):
 - completude forte: um nó que falha é suspeito por todo nó correto em até
-  hb_timeout + atraso da rede após a falha, e continua suspeito;
-- precisão: sem perdas e com atraso < hb_timeout - hb_interval, nenhum nó
-  correto é suspeito; com perdas podem ocorrer falsas suspeitas, sempre
-  desfeitas pelo próximo heartbeat que chegar.
+  timeout + atraso da rede após a falha, e continua suspeito;
+- precisão, timeout fixo: sem perdas e com atraso < timeout - intervalo,
+  nenhum nó correto é suspeito; com perdas ou pausas maiores que o timeout
+  há falsas suspeitas para sempre, todas desfeitas pelo próximo heartbeat;
+- precisão, adaptativo sem teto: depois do GST o intervalo entre heartbeats
+  é limitado, então o timeout cresce um número finito de vezes até superar
+  esse limite e as falsas suspeitas cessam (precisão eventual, ◇P). Um teto
+  limita o tempo de detecção, mas abre mão dessa garantia.
 """
 
 import asyncio
@@ -29,6 +37,7 @@ Callback = Callable[[int], None]
 @dataclass
 class _PeerState:
     last_seen: float
+    timeout: float
     # (encarnação, seq) do último heartbeat aceito; a encarnação cresce a cada
     # reinício do remetente, então a comparação de tuplas ordena certo
     last_hb: tuple[int, int] = (-1, -1)
@@ -52,6 +61,9 @@ class FailureDetector:
         self.factory = factory
         self.interval = cfg.hb_interval_ms / 1000
         self.timeout = cfg.hb_timeout_ms / 1000
+        self.adaptive = cfg.hb_adaptive
+        self.step = cfg.hb_timeout_step_ms / 1000
+        self.max_timeout = cfg.hb_timeout_max_ms / 1000 or None
         self._peers: dict[int, _PeerState] = {}
         self._subscribers: list[tuple[Callback, Callback]] = []
         self._seq = 0
@@ -68,13 +80,17 @@ class FailureDetector:
     def alive_peers(self) -> set[int]:
         return {p for p, s in self._peers.items() if not s.suspected}
 
+    def timeout_of(self, peer: int) -> float:
+        """Timeout atual (s) usado para o peer."""
+        return self._peers[peer].timeout
+
     async def start(self) -> None:
         self.transport.on(MsgType.HEARTBEAT, self._on_heartbeat)
         now = self.clock.now()
         # Todo peer começa como "visto agora": um nó que nunca sobe é
         # suspeito após um timeout, como um que cai
         for peer in self.transport.peers:
-            state = _PeerState(last_seen=now)
+            state = _PeerState(last_seen=now, timeout=self.timeout)
             self._peers[peer] = state
             self._arm(peer, state)
         self._sender = asyncio.ensure_future(self._send_loop())
@@ -108,20 +124,31 @@ class FailureDetector:
         if (inc, seq) <= state.last_hb:
             return
         now = self.clock.now()
+        # Mesma encarnação = o peer nunca caiu; -1 = primeiro contato (ele
+        # pode só ter subido depois de nós, o que não é falsa suspeita)
+        false_suspicion = state.suspected and inc == state.last_hb[0]
         state.last_hb = (inc, seq)
         state.last_seen = now
+        if false_suspicion and self.adaptive:
+            state.timeout += self.step
+            if self.max_timeout is not None:
+                state.timeout = min(state.timeout, self.max_timeout)
         self._arm(msg.src, state)
         if state.suspected:
             state.suspected = False
             self.log.emit(
-                "restore", peer=msg.src, suspected_ms=round((now - state.suspected_at) * 1000, 3)
+                "restore",
+                peer=msg.src,
+                suspected_ms=_ms(now - state.suspected_at),
+                false_suspicion=false_suspicion,
+                timeout_ms=_ms(state.timeout),
             )
             self._notify(msg.src, restore=True)
 
     def _arm(self, peer: int, state: _PeerState) -> None:
         if state.timer is not None:
             state.timer.cancel()
-        state.timer = self.clock.call_later(self.timeout, lambda: self._expire(peer))
+        state.timer = self.clock.call_later(state.timeout, lambda: self._expire(peer))
 
     def _expire(self, peer: int) -> None:
         state = self._peers[peer]
@@ -130,7 +157,9 @@ class FailureDetector:
         now = self.clock.now()
         state.suspected = True
         state.suspected_at = now
-        self.log.emit("suspect", peer=peer, last_seen_ms=round((now - state.last_seen) * 1000, 3))
+        self.log.emit(
+            "suspect", peer=peer, last_seen_ms=_ms(now - state.last_seen), timeout_ms=_ms(state.timeout)
+        )
         self._notify(peer, restore=False)
 
     def _notify(self, peer: int, restore: bool) -> None:
@@ -140,3 +169,7 @@ class FailureDetector:
             except Exception as e:
                 # Bug de um inscrito (ex.: Bully) não pode parar o detector
                 self.log.emit("handler_error", error=repr(e), source="heartbeat")
+
+
+def _ms(seconds: float) -> float:
+    return round(seconds * 1000, 3)

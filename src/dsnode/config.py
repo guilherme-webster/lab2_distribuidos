@@ -25,6 +25,11 @@ class Config:
     # Detector de falhas (heartbeat)
     hb_interval_ms: int = 200
     hb_timeout_ms: int = 600
+    # Timeout adaptativo: cada falsa suspeita soma hb_timeout_step_ms ao
+    # timeout daquele peer, até hb_timeout_max_ms (0 = sem teto)
+    hb_adaptive: bool = False
+    hb_timeout_step_ms: int = 200
+    hb_timeout_max_ms: int = 0
 
     # Eleição Bully
     election_timeout_ms: int = 500
@@ -41,11 +46,16 @@ class Config:
             raise ConfigError(f"node_id {self.node_id} não pode estar em peers")
         if not 0 < self.port < 65536:
             raise ConfigError(f"porta inválida: {self.port}")
-        for name in ("hb_interval_ms", "hb_timeout_ms", "election_timeout_ms", "coord_timeout_ms"):
+        for name in (
+            "hb_interval_ms", "hb_timeout_ms", "hb_timeout_step_ms",
+            "election_timeout_ms", "coord_timeout_ms",
+        ):
             if getattr(self, name) <= 0:
                 raise ConfigError(f"{name} deve ser positivo")
         if self.hb_timeout_ms <= self.hb_interval_ms:
             raise ConfigError("hb_timeout_ms deve ser maior que hb_interval_ms")
+        if self.hb_timeout_max_ms and self.hb_timeout_max_ms < self.hb_timeout_ms:
+            raise ConfigError("hb_timeout_max_ms deve ser 0 (sem teto) ou >= hb_timeout_ms")
         if not 0.0 <= self.drop_rate <= 1.0:
             raise ConfigError(f"drop_rate fora de [0, 1]: {self.drop_rate}")
         if self.delay_ms < 0 or self.jitter_ms < 0:
@@ -77,6 +87,9 @@ class Config:
             port=_parse(env, "PORT", int, defaults.port),
             hb_interval_ms=_parse(env, "HB_INTERVAL_MS", int, defaults.hb_interval_ms),
             hb_timeout_ms=_parse(env, "HB_TIMEOUT_MS", int, defaults.hb_timeout_ms),
+            hb_adaptive=_parse(env, "HB_ADAPTIVE", parse_bool, defaults.hb_adaptive),
+            hb_timeout_step_ms=_parse(env, "HB_TIMEOUT_STEP_MS", int, defaults.hb_timeout_step_ms),
+            hb_timeout_max_ms=_parse(env, "HB_TIMEOUT_MAX_MS", int, defaults.hb_timeout_max_ms),
             election_timeout_ms=_parse(env, "ELECTION_TIMEOUT_MS", int, defaults.election_timeout_ms),
             coord_timeout_ms=_parse(env, "COORD_TIMEOUT_MS", int, defaults.coord_timeout_ms),
             drop_rate=_parse(env, "DROP_RATE", float, defaults.drop_rate),
@@ -103,6 +116,15 @@ def parse_peers(raw: str) -> dict[int, Address]:
             raise ConfigError(f"id repetido em PEERS: {peer_id}")
         peers[peer_id] = (host, port_num)
     return peers
+
+
+def parse_bool(raw: str) -> bool:
+    value = raw.strip().lower()
+    if value in ("1", "true", "yes", "on"):
+        return True
+    if value in ("0", "false", "no", "off", ""):
+        return False
+    raise ValueError(raw)
 
 
 def _parse(env: Mapping[str, str], name: str, conv: type, default=None):

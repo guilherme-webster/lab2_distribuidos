@@ -22,11 +22,12 @@ def test_render_has_one_service_per_node():
 
 def test_tunables_default_to_config_defaults():
     text = gen_compose.render(2)
-    defaults = Config(node_id=1)
     for var, default in gen_compose.TUNABLES.items():
         assert f"${{{var}:-{default}}}" in text
-        field = var.lower()
-        assert str(getattr(defaults, field)) == default, var
+    # Os padrões do compose, lidos pelo config.py, dão a config padrão
+    env = {"NODE_ID": "1", **gen_compose.TUNABLES}
+    assert Config.from_env(env) == Config(node_id=1)
+    assert all(hasattr(Config(node_id=1), var.lower()) for var in gen_compose.TUNABLES)
 
 
 def test_render_rejects_zero_nodes():

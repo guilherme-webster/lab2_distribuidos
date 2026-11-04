@@ -13,8 +13,9 @@ DELAY = 0.005
 
 
 class Cluster:
-    def __init__(self, n: int, start: list[int] | None = None, **net_kwargs):
+    def __init__(self, n: int, start: list[int] | None = None, cfg: dict | None = None, **net_kwargs):
         net_kwargs.setdefault("delay", DELAY)
+        self.cfg = cfg or {}
         self.net = FakeNetwork(list(range(1, n + 1)), **net_kwargs)
         self.clock = self.net.clock
         self.det: dict[int, FailureDetector] = {}
@@ -28,7 +29,9 @@ class Cluster:
 
     async def boot(self, i: int, incarnation: int = 0) -> FailureDetector:
         log = MemoryLog(i, self.clock.now)
-        cfg = Config(node_id=i, hb_interval_ms=INTERVAL * 1000, hb_timeout_ms=TIMEOUT * 1000)
+        cfg = Config(
+            node_id=i, hb_interval_ms=int(INTERVAL * 1000), hb_timeout_ms=int(TIMEOUT * 1000), **self.cfg
+        )
         det = FailureDetector(self.net.transport(i, log), self.clock, cfg, log, MessageFactory(i, incarnation))
         await det.start()
         self.det[i], self.logs[i] = det, log
@@ -186,7 +189,7 @@ async def test_subscribers_are_notified_and_errors_isolated():
     c = await cluster(3)
     calls = []
 
-    def broken(peer):
+    def broken(*_):
         raise RuntimeError("bug no inscrito")
 
     c.det[1].subscribe(broken, broken)
@@ -210,3 +213,85 @@ async def test_message_cost_is_quadratic(n):
     heartbeats = [m for m in c.net.sent if m.type == MsgType.HEARTBEAT]
     rounds = len(heartbeats) / (n * (n - 1))
     assert rounds == pytest.approx(10.0 / INTERVAL, abs=1)
+
+
+# --- falsa suspeita e timeout adaptativo ------------------------------------
+
+ADAPTIVE = {"hb_adaptive": True, "hb_timeout_step_ms": 200}
+OUTAGE, PERIOD, PERIODS = 0.8, 3.0, 10
+
+
+async def periodic_outages(c: Cluster, node: int = 3) -> list[list[dict]]:
+    """Isola `node` por OUTAGE s a cada PERIOD s (como pausas de GC/rede).
+
+    Devolve, por período, as suspeitas do nó 1 sobre `node`. Uma pausa de 0,8 s
+    faz o intervalo entre heartbeats recebidos ficar entre 0,8 e 1,2 s.
+    """
+    others = set(c.det) - {node}
+    per_period = []
+    await c.net.run(1.1)  # desalinhado dos envios (múltiplos de 0,2 s)
+    for _ in range(PERIODS):
+        before = len(c.events(1, "suspect"))
+        c.net.partition(others, {node})
+        await c.net.run(OUTAGE)
+        c.net.heal()
+        await c.net.run(PERIOD - OUTAGE)
+        per_period.append(c.events(1, "suspect")[before:])
+    return per_period
+
+
+async def test_fixed_timeout_suspects_on_every_outage():
+    c = await cluster(3)
+    per_period = await periodic_outages(c)
+    assert [len(p) for p in per_period] == [1] * PERIODS
+    restores = c.events(1, "restore")
+    assert len(restores) == PERIODS
+    assert all(r["false_suspicion"] and r["timeout_ms"] == TIMEOUT * 1000 for r in restores)
+
+
+async def test_adaptive_timeout_stops_false_suspicions():
+    c = await cluster(3, cfg=ADAPTIVE)
+    per_period = await periodic_outages(c)
+    total = sum(len(p) for p in per_period)
+    # Cada falsa suspeita soma 0,2 s; com timeout >= 1,2 s nenhuma pausa basta
+    assert 1 <= total <= 3
+    assert all(p == [] for p in per_period[PERIODS // 2:])  # precisão eventual
+    assert TIMEOUT < c.det[1].timeout_of(3) <= 1.2 + 1e-9
+    assert [r["timeout_ms"] for r in c.events(1, "restore")] == pytest.approx(
+        [(TIMEOUT + 0.2 * k) * 1000 for k in range(1, total + 1)]
+    )
+    # O nó 2 nunca foi isolado do 1: o timeout dele não mudou
+    assert c.det[1].timeout_of(2) == TIMEOUT
+
+
+async def test_timeout_cap_bounds_detection_but_keeps_false_suspicions():
+    c = await cluster(3, cfg={**ADAPTIVE, "hb_timeout_max_ms": 800})
+    per_period = await periodic_outages(c)
+    assert c.det[1].timeout_of(3) == pytest.approx(0.8)
+    assert sum(len(p) for p in per_period) == PERIODS  # teto < pausa: sem ◇P
+
+
+async def test_adapted_timeout_still_detects_crash():
+    c = await cluster(3, cfg=ADAPTIVE)
+    await periodic_outages(c)
+    adapted = c.det[1].timeout_of(3)
+    crash_at = c.clock.now()
+    c.crash(3)
+    await c.net.run(adapted + 1.0)
+    suspect = c.events(1, "suspect")[-1]
+    assert suspect["peer"] == 3 and suspect["timeout_ms"] == pytest.approx(adapted * 1000)
+    assert suspect["ts"] - crash_at <= adapted + DELAY + 1e-9
+
+
+async def test_restart_and_late_start_are_not_false_suspicions():
+    c = await cluster(3, start=[1, 2], cfg=ADAPTIVE)
+    await c.net.run(1.0)
+    await c.boot(3)  # sobe atrasado: primeiro contato
+    await c.net.run(1.0)
+    c.crash(3)
+    await c.net.run(2.0)
+    await c.boot(3, incarnation=1)  # reinício de verdade
+    await c.net.run(1.0)
+    restores = c.events(1, "restore")
+    assert [r["false_suspicion"] for r in restores] == [False, False]
+    assert c.det[1].timeout_of(3) == TIMEOUT
