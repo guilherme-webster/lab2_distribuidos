@@ -5,7 +5,13 @@
 
 Lê eventos JSON (um por linha) dos nós e registros de falhas injetadas:
 
-    {"ts": ..., "event": "fault", "action": "kill|stop|pause|unpause|start", "target": 4}
+    {"ts": ..., "event": "fault", "action": "kill|stop|pause|unpause|start", "target": 4,
+     "issued_ts": ..., "cmd_ms": ...}
+
+O efeito de uma falha acontece em algum instante entre issued_ts (comando
+disparado) e ts (comando terminado); o verificador usa issued_ts quando
+existe, então latências medidas a partir de uma falha são limites superiores,
+com incerteza de até cmd_ms.
 
 O estado real de cada nó (no ar ou não) vem de node_start/node_stop e das
 falhas; ele é comparado com o que os detectores concluíram (suspect/restore):
@@ -61,6 +67,11 @@ def load(paths: list[str | Path]) -> tuple[list[dict], int]:
 
 # --- estado real dos nós ---------------------------------------------------
 
+def fault_ts(r: dict) -> float:
+    """Instante mais cedo em que a falha pode ter tido efeito."""
+    return r.get("issued_ts", r["ts"])
+
+
 class Timeline:
     """Quando cada nó esteve no ar, segundo node_start/node_stop e as falhas."""
 
@@ -73,10 +84,12 @@ class Timeline:
                 changes[r["node"]].append((r["ts"], False))
             elif r["event"] == "fault":
                 if r["action"] in DOWN_ACTIONS:
-                    changes[r["target"]].append((r["ts"], False))
+                    changes[r["target"]].append((fault_ts(r), False))
                 elif r["action"] == "unpause":
-                    changes[r["target"]].append((r["ts"], True))
+                    changes[r["target"]].append((fault_ts(r), True))
                 # "start" não muda nada: o nó só está no ar no node_start
+        for c in changes.values():
+            c.sort(key=lambda change: change[0])
         self._ts = {n: [t for t, _ in c] for n, c in changes.items()}
         self._up = {n: [u for _, u in c] for n, c in changes.items()}
 
@@ -174,10 +187,10 @@ def check(
 
     # Completude e permanência
     crashes = [
-        (r["target"], r["ts"]) for r in records
+        (r["target"], fault_ts(r), r.get("cmd_ms", 0.0) / 1000) for r in records
         if r["event"] == "fault" and r["action"] in CRASH_ACTIONS
     ]
-    for q, t_crash in crashes:
+    for q, t_crash, uncertainty in crashes:
         t_back = timeline.next_up(q, t_crash)
         for p in nodes:
             if p == q:
@@ -197,7 +210,9 @@ def check(
                     report.completeness_violations.append(entry)
                     continue
                 detected_ts = hits[0]["ts"]
-            report.detections.append({**entry, "latency_s": round(detected_ts - t_crash, 6)})
+            report.detections.append({
+                **entry, "latency_s": round(detected_ts - t_crash, 6), "uncertainty_s": round(uncertainty, 6),
+            })
             restored = [r for r in views[(p, q)] if r["event"] == "restore" and detected_ts < r["ts"] < t_back]
             if restored:
                 report.permanence_violations.append({**entry, "restore_ts": restored[0]["ts"]})
@@ -220,7 +235,7 @@ def check(
         if r["node"] in seen:
             returns.append((r["node"], r["ts"]))
         seen.add(r["node"])
-    returns += [(r["target"], r["ts"]) for r in records if r["event"] == "fault" and r["action"] == "unpause"]
+    returns += [(r["target"], fault_ts(r)) for r in records if r["event"] == "fault" and r["action"] == "unpause"]
     for q, t_back in returns:
         for p in nodes:
             if p == q or timeline.down_during(p, t_back, t_back + recovery_bound):

@@ -83,6 +83,23 @@ def test_crash_shorter_than_bound_is_not_required():
     assert report.ok and report.detections == []
 
 
+def test_fault_time_is_when_the_command_was_issued():
+    # docker kill disparado em 10.0 e terminado em 10.5: a suspeita em 10.45
+    # vem depois do disparo, então conta como detecção (e não como prévia)
+    kill = {**fault("kill", 3, 10.5), "issued_ts": 10.0, "cmd_ms": 500.0}
+    report = run(*BOOT, kill, suspect(1, 3, 10.45), suspect(2, 3, 10.6), tick(20))
+    assert report.ok and report.false_suspicions == []
+    assert {d["observer"]: d["latency_s"] for d in report.detections} == pytest.approx({1: 0.45, 2: 0.6})
+    assert all(d["uncertainty_s"] == 0.5 for d in report.detections)
+
+
+def test_restore_during_unpause_command_counts_as_recovery():
+    unpause = {**fault("unpause", 3, 12.1), "issued_ts": 12.0, "cmd_ms": 100.0}
+    report = run(*BOOT, fault("pause", 3, 10.0), suspect(1, 3, 10.6), suspect(2, 3, 10.6),
+                 unpause, restore(1, 3, 12.05, True), restore(2, 3, 12.08, True), tick(20))
+    assert report.ok and len(report.recoveries) == 2
+
+
 def test_already_suspected_counts_as_immediate_detection():
     report = run(*BOOT, suspect(1, 3, 9.0), fault("kill", 3, 10.0), suspect(2, 3, 10.6), tick(20))
     assert report.ok
