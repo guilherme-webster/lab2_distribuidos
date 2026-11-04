@@ -24,9 +24,12 @@ from dsnode.messages import Message, MessageError
 Handler = Callable[[Message], Awaitable[None]]
 
 # A resolução de nomes usa o relógio real (o transporte UDP só roda de
-# verdade); o cache é curto porque um contêiner reiniciado pode mudar de IP
+# verdade); o cache é curto porque um contêiner reiniciado pode mudar de IP.
+# Falhas também ficam em cache (por pouco tempo): o nome de um contêiner morto
+# pode levar RESOLVE_TIMEOUT para falhar, e consultar a cada envio é inútil
 RESOLVE_TIMEOUT = 0.5
 RESOLVE_TTL = 2.0
+RESOLVE_FAIL_TTL = 0.2
 
 
 class Transport(Protocol):
@@ -34,7 +37,8 @@ class Transport(Protocol):
     peers: list[int]
 
     async def send(self, dst: int, msg: Message) -> None:
-        """Best-effort: nunca levanta erro de rede, só registra msg_drop."""
+        """Best-effort e sem bloquear: nunca levanta erro de rede nem espera
+        pela rede; falhas só aparecem como msg_drop."""
         ...
 
     def on(self, msg_type: str, handler: Handler) -> None: ...
@@ -48,7 +52,9 @@ class UdpTransport:
         self.peers = cfg.peer_ids
         self._handlers: dict[str, Handler] = {}
         self._tasks: set[asyncio.Task] = set()
-        self._cache: dict[int, tuple[Address, float]] = {}
+        # dst -> (endereço ou None se a resolução falhou, validade)
+        self._cache: dict[int, tuple[Address | None, float]] = {}
+        self._resolving: dict[int, asyncio.Future] = {}
         self._udp: asyncio.DatagramTransport | None = None
         self._rng = random.Random(cfg.seed * 1000 + cfg.node_id)
         self._pending: set[asyncio.Task] = set()
@@ -63,7 +69,7 @@ class UdpTransport:
         )
 
     def close(self) -> None:
-        for task in self._pending:
+        for task in (*self._pending, *self._resolving.values()):
             task.cancel()
         if self._udp is not None:
             self._udp.close()
@@ -99,34 +105,52 @@ class UdpTransport:
         if self._rng.random() < self.cfg.drop_rate:
             return self._emit("msg_drop", msg, dst, reason="loss")
         latency = (self.cfg.delay_ms + self._rng.uniform(0, self.cfg.jitter_ms)) / 1000
+        hit, addr = self._cached(dst)
+        if hit and addr is None:
+            return self._emit("msg_drop", msg, dst, reason="resolve")
+        if hit and latency == 0:
+            return self._sendto(dst, msg, addr)
+        # Atraso injetado ou endereço desconhecido: segue em segundo plano,
+        # para o chamador (ex.: laço de heartbeats) nunca esperar pelo DNS
+        task = asyncio.ensure_future(self._transmit(dst, msg, latency))
+        self._pending.add(task)
+        task.add_done_callback(self._pending.discard)
+
+    async def _transmit(self, dst: int, msg: Message, latency: float) -> None:
         if latency > 0:
-            task = asyncio.ensure_future(self._transmit_later(dst, msg, latency))
-            self._pending.add(task)
-            task.add_done_callback(self._pending.discard)
-        else:
-            await self._transmit(dst, msg)
-
-    async def _transmit_later(self, dst: int, msg: Message, latency: float) -> None:
-        await asyncio.sleep(latency)
-        await self._transmit(dst, msg)
-
-    async def _transmit(self, dst: int, msg: Message) -> None:
-        if self._udp is None:
-            return
+            await asyncio.sleep(latency)
         addr = await self._resolve(dst)
         if addr is None:
             return self._emit("msg_drop", msg, dst, reason="resolve")
+        self._sendto(dst, msg, addr)
+
+    def _sendto(self, dst: int, msg: Message, addr: Address) -> None:
+        if self._udp is None:
+            return
         try:
             self._udp.sendto(msg.to_bytes(), addr)
         except OSError as e:
             self._cache.pop(dst, None)
             self._emit("msg_drop", msg, dst, reason="send_error", error=repr(e))
 
+    def _cached(self, dst: int) -> tuple[bool, Address | None]:
+        entry = self._cache.get(dst)
+        if entry and entry[1] > asyncio.get_running_loop().time():
+            return True, entry[0]
+        return False, None
+
     async def _resolve(self, dst: int) -> Address | None:
+        hit, addr = self._cached(dst)
+        if hit:
+            return addr
+        # Envios simultâneos ao mesmo destino compartilham uma única consulta
+        if dst not in self._resolving:
+            self._resolving[dst] = asyncio.ensure_future(self._lookup(dst))
+            self._resolving[dst].add_done_callback(lambda _: self._resolving.pop(dst, None))
+        return await asyncio.shield(self._resolving[dst])
+
+    async def _lookup(self, dst: int) -> Address | None:
         loop = asyncio.get_running_loop()
-        cached = self._cache.get(dst)
-        if cached and cached[1] > loop.time():
-            return cached[0]
         host, port = self.cfg.peers[dst]
         try:
             infos = await asyncio.wait_for(
@@ -135,7 +159,7 @@ class UdpTransport:
             )
         except (OSError, TimeoutError):
             # Nó parado some do DNS do Docker: é uma falha esperada, não um erro
-            self._cache.pop(dst, None)
+            self._cache[dst] = (None, loop.time() + RESOLVE_FAIL_TTL)
             return None
         addr = infos[0][4][:2]
         self._cache[dst] = (addr, loop.time() + RESOLVE_TTL)

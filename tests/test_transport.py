@@ -8,6 +8,7 @@ import pytest
 from dsnode.config import Config
 from dsnode.log import MemoryLog
 from dsnode.messages import MessageFactory
+from dsnode import transport as transport_mod
 from dsnode.transport import UdpTransport
 
 WAIT = 1.0
@@ -124,17 +125,83 @@ async def test_unknown_peer_raises(pair):
         await t1.send(7, MessageFactory(1).new("PING", 7))
 
 
-async def test_unresolvable_peer_is_dropped_not_raised():
+async def wait_events(log, name: str, count: int, timeout: float = WAIT) -> list[dict]:
+    deadline = asyncio.get_running_loop().time() + timeout
+    while len(log.events(name)) < count and asyncio.get_running_loop().time() < deadline:
+        await asyncio.sleep(0.01)
+    return log.events(name)
+
+
+async def unresolvable_transport() -> UdpTransport:
     (port,) = free_ports(1)
     cfg = Config(node_id=1, peers={2: ("no-such-node.invalid", 9000)}, host="127.0.0.1", port=port)
     t = UdpTransport(cfg, MemoryLog(1))
     await t.start()
+    return t
+
+
+async def test_unresolvable_peer_is_dropped_not_raised():
+    t = await unresolvable_transport()
     try:
         await t.send(2, MessageFactory(1).new("PING", 2))
+        drops = await wait_events(t.log, "msg_drop", 1)
     finally:
         t.close()
     assert len(t.log.events("msg_send")) == 1
-    assert [r["reason"] for r in t.log.events("msg_drop")] == ["resolve"]
+    assert [r["reason"] for r in drops] == ["resolve"]
+
+
+async def test_failed_resolution_is_cached_briefly():
+    t = await unresolvable_transport()
+    lookups = []
+    original = t._lookup
+
+    async def counting(dst):
+        lookups.append(dst)
+        return await original(dst)
+
+    t._lookup = counting
+    f = MessageFactory(1)
+    try:
+        # Envios simultâneos compartilham uma consulta
+        for _ in range(5):
+            await t.send(2, f.new("PING", 2))
+        await wait_events(t.log, "msg_drop", 5)
+        assert lookups == [2]
+        # Logo depois da falha: descarte imediato, sem nova consulta
+        await t.send(2, f.new("PING", 2))
+        assert len(t.log.events("msg_drop")) == 6 and lookups == [2]
+        # Passada a validade, tenta resolver de novo (o nó pode ter voltado)
+        await asyncio.sleep(transport_mod.RESOLVE_FAIL_TTL + 0.05)
+        await t.send(2, f.new("PING", 2))
+        await wait_events(t.log, "msg_drop", 7)
+        assert lookups == [2, 2]
+    finally:
+        t.close()
+
+
+async def test_slow_dns_for_one_peer_does_not_delay_others():
+    """Regressão: o nome de um contêiner morto pode levar RESOLVE_TIMEOUT para
+    falhar; o send() esperava, e o laço de heartbeats atrasava para todos."""
+    t1, t2 = await make_pair()
+    try:
+        inbox = inbox_for(t2)
+        loop = asyncio.get_running_loop()
+        original = t1._lookup
+
+        async def slow_dns(dst):
+            await asyncio.sleep(0.3)
+            return await original(dst)
+
+        t1._lookup = slow_dns
+        t1._cache.clear()
+        start = loop.time()
+        await t1.send(2, MessageFactory(1).new("PING", 2))
+        assert loop.time() - start < 0.05  # send() não espera pelo DNS
+        await asyncio.wait_for(inbox.get(), WAIT)  # e a mensagem chega depois
+    finally:
+        t1.close()
+        t2.close()
 
 
 # --- injeção de falhas -----------------------------------------------------
