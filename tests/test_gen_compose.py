@@ -1,14 +1,9 @@
-import importlib.util
-from pathlib import Path
-
 import pytest
 
 from dsnode.config import Config
+from tests.scripts import ROOT, load_script
 
-ROOT = Path(__file__).resolve().parent.parent
-_spec = importlib.util.spec_from_file_location("gen_compose", ROOT / "scripts" / "gen_compose.py")
-gen_compose = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(gen_compose)
+gen_compose = load_script("gen_compose")
 
 
 def test_render_has_one_service_per_node():
