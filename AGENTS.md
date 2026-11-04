@@ -31,6 +31,8 @@ make ps            # estado dos contêineres
 make logs          # logs JSON de todos os nós, ordenados por ts
 make logs-f        # acompanha os logs ao vivo
 make down          # remove todo o ambiente
+make kill NODE=3   # injeta falha (também stop/start/pause/unpause), registrada em .run/faults.jsonl
+make check-hb      # verifica o heartbeat nos logs atuais + falhas (ARGS=--strict-accuracy)
 make compose       # regenera o compose.yaml versionado
 make experiments   # (a fazer) roda os experimentos e grava em experiments/raw/
 ```

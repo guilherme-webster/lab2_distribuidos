@@ -10,12 +10,15 @@ RUN_COMPOSE ?= .run/compose.yaml
 UP_FILE := $(if $(filter 5,$(N)),compose.yaml,$(RUN_COMPOSE))
 CUR_FILE = $(if $(wildcard $(RUN_COMPOSE)),$(RUN_COMPOSE),compose.yaml)
 COMPOSE = docker compose --project-directory . -f
+FAULTS_FILE ?= .run/faults.jsonl
+FAULT = RUN_COMPOSE=$(RUN_COMPOSE) FAULTS_FILE=$(FAULTS_FILE) scripts/faults.sh
 
 .DEFAULT_GOAL := help
-.PHONY: help install test test-e2e build up ps logs logs-f down compose
+.PHONY: help install test test-e2e build up ps logs logs-f down compose \
+	kill stop start pause unpause check-hb
 
 help: ## lista os alvos
-	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-10s %s\n", $$1, $$2}'
+	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-10s %s\n", $$1, $$2}'
 
 install: ## cria .venv e instala o pacote com dependências de dev e análise
 	python3 -m venv .venv
@@ -31,6 +34,7 @@ build: ## constrói a imagem do nó
 	$(COMPOSE) compose.yaml build
 
 up: ## sobe N nós em segundo plano (padrão N=5)
+	rm -f $(FAULTS_FILE)
 ifeq ($(N),5)
 	rm -f $(RUN_COMPOSE)
 else
@@ -51,6 +55,26 @@ logs-f: ## acompanha os logs ao vivo
 down: ## remove contêineres e rede do ambiente
 	$(COMPOSE) $(CUR_FILE) down --remove-orphans -t 2
 	rm -f $(RUN_COMPOSE)
+
+kill: ## crash do nó NODE (SIGKILL), registrado em .run/faults.jsonl
+	$(FAULT) kill $(NODE)
+
+stop: ## parada limpa do nó NODE
+	$(FAULT) stop $(NODE)
+
+start: ## religa o nó NODE
+	$(FAULT) start $(NODE)
+
+pause: ## congela o nó NODE
+	$(FAULT) pause $(NODE)
+
+unpause: ## descongela o nó NODE
+	$(FAULT) unpause $(NODE)
+
+check-hb: ## verifica o heartbeat nos logs atuais e nas falhas registradas
+	@mkdir -p .run
+	@$(COMPOSE) $(CUR_FILE) logs --no-log-prefix > .run/logs.jsonl
+	$(PYTHON) scripts/check_heartbeat.py .run/logs.jsonl $(wildcard $(FAULTS_FILE)) $(ARGS)
 
 compose: ## regenera o compose.yaml versionado (N=5)
 	$(PYTHON) scripts/gen_compose.py 5 -o compose.yaml

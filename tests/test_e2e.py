@@ -22,9 +22,11 @@ ROOT = Path(__file__).resolve().parent.parent
 N = 4
 PROJECT = "mc714-e2e"
 RUN_COMPOSE = ".run/e2e-compose.yaml"
+FAULTS_FILE = ".run/e2e-faults.jsonl"
 ENV = {**os.environ, "COMPOSE_PROJECT_NAME": PROJECT}
 STARTUP_TIMEOUT = 20.0
 WARMUP = 3.0          # s de operação normal observados antes dos testes
+OUTAGE = 2.0          # s que uma vítima fica fora: > timeout + folga do verificador
 EVENT_TIMEOUT = 15.0  # prazo para um evento esperado aparecer nos logs
 
 
@@ -52,12 +54,24 @@ def make(*args: str, timeout: float = 60) -> str:
     return result.stdout
 
 
-def compose(*args: str) -> None:
+def fault(action: str, node: int) -> dict:
+    """Injeta a falha pelo scripts/faults.sh, que também a registra."""
     result = subprocess.run(
-        ["docker", "compose", "--project-directory", ".", "-f", RUN_COMPOSE, *args],
-        cwd=ROOT, env=ENV, capture_output=True, text=True, timeout=60,
+        ["scripts/faults.sh", action, str(node)],
+        cwd=ROOT, env={**ENV, "RUN_COMPOSE": RUN_COMPOSE, "FAULTS_FILE": FAULTS_FILE},
+        capture_output=True, text=True, timeout=60,
     )
-    assert result.returncode == 0, f"docker compose {' '.join(args)} falhou:\n{result.stderr}"
+    assert result.returncode == 0, f"faults.sh {action} {node} falhou:\n{result.stderr}"
+    return json.loads(result.stdout)
+
+
+def checked(**kwargs):
+    """Roda o check_heartbeat sobre os logs atuais e as falhas registradas."""
+    records = Logs(make("logs")).records
+    faults, _ = check_heartbeat.load([ROOT / FAULTS_FILE])
+    report = check_heartbeat.check(sorted(records + faults, key=lambda r: r["ts"]), **kwargs)
+    assert report.ok, check_heartbeat.format_report(report)
+    return report
 
 
 def project_containers() -> list[str]:
@@ -108,6 +122,7 @@ def wait_logs(done, timeout: float = EVENT_TIMEOUT) -> Logs:
 @pytest.fixture(scope="module")
 def cluster():
     make("down")  # sobra de uma execução interrompida
+    (ROOT / FAULTS_FILE).unlink(missing_ok=True)
     make("up", f"N={N}", timeout=300)
     try:
         wait_logs(lambda logs: logs.heard() == ALL_PAIRS, STARTUP_TIMEOUT)
@@ -157,27 +172,25 @@ def test_no_suspicions_in_normal_operation(cluster):
 
 
 def test_crash_is_detected_and_recovery_restored(cluster):
-    """H2 + recuperação no sistema real. Roda por último: mata e religa um nó."""
+    """H2 + recuperação no sistema real. Altera o ambiente: roda depois dos
+    testes acima (o pytest segue a ordem do arquivo)."""
     victim, survivors = N, range(1, N)
     _, timeout = hb_params(cluster)
 
-    faults = []  # o docker kill não deixa rastro nos logs: registramos aqui
-    killed_at = time.time()
-    compose("kill", f"node{victim}")
-    faults.append({"ts": killed_at, "event": "fault", "action": "kill", "target": victim})
+    kill = fault("kill", victim)
+    killed_at = kill["issued_ts"]
     logs = wait_logs(lambda l: all(l.after("suspect", killed_at, node=i, peer=victim) for i in survivors))
     for i in survivors:
         suspects = logs.after("suspect", killed_at, node=i, peer=victim)
         assert suspects, f"nó {i} não suspeitou do nó {victim}"
-        # Folga para o atraso do próprio docker kill e do escalonamento
-        assert suspects[0]["ts"] - killed_at <= timeout + 0.5
+        # Folga para o escalonamento dos contêineres
+        assert suspects[0]["ts"] - kill["ts"] <= timeout + 0.5
     # Só a vítima é suspeita: a falha de um nó não atrapalha os demais
     wrong = [(r["node"], r["peer"]) for r in logs.after("suspect", killed_at) if r["peer"] != victim]
     assert wrong == [], f"falsas suspeitas após o crash (nó, suspeito): {wrong}"
 
-    restarted_at = time.time()
-    compose("start", f"node{victim}")
-    faults.append({"ts": restarted_at, "event": "fault", "action": "start", "target": victim})
+    time.sleep(max(0.0, kill["ts"] + OUTAGE - time.time()))
+    restarted_at = fault("start", victim)["issued_ts"]
     logs = wait_logs(lambda l: all(l.after("restore", restarted_at, node=i, peer=victim) for i in survivors))
     for i in survivors:
         restores = logs.after("restore", restarted_at, node=i, peer=victim)
@@ -189,7 +202,28 @@ def test_crash_is_detected_and_recovery_restored(cluster):
 
     # As mesmas propriedades, pelo verificador que os experimentos usam
     time.sleep(1.0)
-    records = sorted(Logs(make("logs")).records + faults, key=lambda r: r["ts"])
-    report = check_heartbeat.check(records, strict_accuracy=True)
-    assert report.ok, check_heartbeat.format_report(report)
+    report = checked(strict_accuracy=True)
     assert len(report.detections) == len(survivors) and len(report.recoveries) == len(survivors)
+
+
+def test_pause_causes_false_suspicion_then_restore(cluster):
+    """H3 no sistema real: um nó congelado (lento, mas não falho) é suspeito e,
+    ao voltar, restaurado com false_suspicion. Roda depois do teste de crash."""
+    victim, others = 2, [n for n in range(1, N + 1) if n != 2]
+    pause = fault("pause", victim)
+    paused_at = pause["issued_ts"]
+    wait_logs(lambda l: all(l.after("suspect", paused_at, node=i, peer=victim) for i in others))
+    time.sleep(max(0.0, pause["ts"] + OUTAGE - time.time()))
+
+    resumed_at = fault("unpause", victim)["issued_ts"]
+    logs = wait_logs(lambda l: all(l.after("restore", resumed_at, node=i, peer=victim) for i in others))
+    for i in others:
+        restores = logs.after("restore", resumed_at, node=i, peer=victim)
+        assert restores, f"nó {i} não restaurou o nó {victim}"
+        assert restores[0]["false_suspicion"] is True  # mesma encarnação: nunca caiu
+
+    # Para o verificador, as suspeitas da pausa são justificadas (o nó esteve
+    # fora do ar), inclusive as do próprio nó pausado ao despausar
+    time.sleep(1.0)
+    report = checked(strict_accuracy=True)
+    assert any(r["target"] == victim for r in report.recoveries)
