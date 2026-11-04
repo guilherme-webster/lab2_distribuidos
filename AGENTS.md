@@ -34,7 +34,9 @@ make down          # remove todo o ambiente
 make kill NODE=3   # injeta falha (também stop/start/pause/unpause), registrada em .run/faults.jsonl
 make check-hb      # verifica o heartbeat nos logs atuais + falhas (ARGS=--strict-accuracy)
 make compose       # regenera o compose.yaml versionado
-make experiments   # (a fazer) roda os experimentos e grava em experiments/raw/
+make experiments   # roda e analisa os experimentos de experiments/configs/ (EXP=hb-loss SEEDS=2)
+make analyze       # só reanalisa experiments/raw/ → experiments/results/ (CSVs e gráficos)
+make env           # hardware, SO e versões (gravado com cada experimento)
 ```
 
 Parâmetros dos algoritmos e da injeção de falhas vão pelo ambiente do host:
