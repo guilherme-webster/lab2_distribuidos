@@ -212,3 +212,13 @@ async def test_checker_agrees_with_detector_on_false_suspicions():
     startup = [r for log in c.logs.values() for r in log.events("suspect") if r["ts"] <= TIMEOUT + slack]
     assert report.justified_suspicions == len(startup)
     assert all(m.type == MsgType.HEARTBEAT for m in c.net.dropped)
+
+
+def test_cli_reads_gzipped_logs(tmp_path, capsys):
+    import gzip
+
+    logs = tmp_path / "logs.jsonl.gz"
+    lines = [*BOOT, fault("kill", 3, 10.0), suspect(1, 3, 10.6), suspect(2, 3, 10.6), tick(20)]
+    logs.write_bytes(gzip.compress("\n".join(json.dumps(r) for r in lines).encode()))
+    assert chk.main([str(logs)]) == 0
+    assert "2 detecções" in capsys.readouterr().out

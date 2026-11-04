@@ -31,6 +31,7 @@ detecção, taxa de falsas suspeitas, latência de restore) vão para --json.
 """
 
 import argparse
+import gzip
 import json
 import math
 import sys
@@ -47,11 +48,17 @@ CRASH_ACTIONS = {"kill", "stop"}
 
 # --- leitura ---------------------------------------------------------------
 
+def read_text(path: str | Path) -> str:
+    """Lê o arquivo, descomprimindo se terminar em .gz (dados brutos versionados)."""
+    path = Path(path)
+    return gzip.decompress(path.read_bytes()).decode() if path.suffix == ".gz" else path.read_text()
+
+
 def load(paths: list[str | Path]) -> tuple[list[dict], int]:
     """Junta os arquivos em uma lista ordenada por ts; conta linhas inválidas."""
     records, garbage = [], 0
     for path in paths:
-        for line in Path(path).read_text().splitlines():
+        for line in read_text(path).splitlines():
             try:
                 record = json.loads(line)
             except json.JSONDecodeError:
