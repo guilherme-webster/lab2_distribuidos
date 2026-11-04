@@ -1,7 +1,7 @@
 """Ponto de entrada do nó: `python -m dsnode.node`.
 
-Provisório: só troca PING/PONG com os peers para validar transporte, Docker e
-compose. O heartbeat e o Bully serão ligados aqui.
+Monta os componentes de um nó sobre o transporte UDP: detector de falhas por
+heartbeat e, depois, a eleição Bully (inscrita no detector).
 """
 
 import asyncio
@@ -11,29 +11,22 @@ import time
 
 from dsnode.clock import RealClock
 from dsnode.config import Config
+from dsnode.heartbeat import FailureDetector
 from dsnode.log import EventLog
-from dsnode.messages import Message, MessageFactory
+from dsnode.messages import MessageFactory
 from dsnode.transport import UdpTransport
-
-# Provisório: some quando o heartbeat substituir o ping
-PING_INTERVAL = 1.0
 
 
 async def run(cfg: Config) -> None:
     log = EventLog(cfg.node_id)
     clock = RealClock()
-    # Encarnação = instante de início em ms: distingue msg_ids após um restart
+    # Uma única fábrica por nó, compartilhada pelos algoritmos: msg_ids únicos.
+    # Encarnação = instante de início em ms: cresce a cada reinício do nó
     factory = MessageFactory(cfg.node_id, incarnation=time.time_ns() // 1_000_000)
     transport = UdpTransport(cfg, log)
-
-    async def on_ping(msg: Message) -> None:
-        await transport.send(msg.src, factory.new("PONG", msg.src, {"ping": msg.msg_id}))
-
-    async def on_pong(msg: Message) -> None:
-        pass  # msg_recv já fica registrado pelo transporte
-
-    transport.on("PING", on_ping)
-    transport.on("PONG", on_pong)
+    detector = FailureDetector(transport, clock, cfg, log, factory)
+    # Bully: criar aqui com o mesmo transport/clock/cfg/log/factory e o
+    # detector, e inscrevê-lo com detector.subscribe(on_suspect, on_restore)
 
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -42,18 +35,11 @@ async def run(cfg: Config) -> None:
 
     await transport.start()
     log.emit("node_start", incarnation=factory.incarnation, config=dataclasses.asdict(cfg))
-
-    async def ping_loop() -> None:
-        while True:
-            for peer in transport.peers:
-                await transport.send(peer, factory.new("PING", peer))
-            await clock.sleep(PING_INTERVAL)
-
-    pinger = asyncio.ensure_future(ping_loop())
+    await detector.start()
     try:
         await stop.wait()
     finally:
-        pinger.cancel()
+        detector.stop()
         transport.close()
         log.emit("node_stop")
 
