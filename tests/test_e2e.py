@@ -15,6 +15,9 @@ from pathlib import Path
 
 import pytest
 
+from tests.scripts import load_script
+
+check_heartbeat = load_script("check_heartbeat")
 ROOT = Path(__file__).resolve().parent.parent
 N = 4
 PROJECT = "mc714-e2e"
@@ -158,8 +161,10 @@ def test_crash_is_detected_and_recovery_restored(cluster):
     victim, survivors = N, range(1, N)
     _, timeout = hb_params(cluster)
 
+    faults = []  # o docker kill não deixa rastro nos logs: registramos aqui
     killed_at = time.time()
     compose("kill", f"node{victim}")
+    faults.append({"ts": killed_at, "event": "fault", "action": "kill", "target": victim})
     logs = wait_logs(lambda l: all(l.after("suspect", killed_at, node=i, peer=victim) for i in survivors))
     for i in survivors:
         suspects = logs.after("suspect", killed_at, node=i, peer=victim)
@@ -172,6 +177,7 @@ def test_crash_is_detected_and_recovery_restored(cluster):
 
     restarted_at = time.time()
     compose("start", f"node{victim}")
+    faults.append({"ts": restarted_at, "event": "fault", "action": "start", "target": victim})
     logs = wait_logs(lambda l: all(l.after("restore", restarted_at, node=i, peer=victim) for i in survivors))
     for i in survivors:
         restores = logs.after("restore", restarted_at, node=i, peer=victim)
@@ -180,3 +186,10 @@ def test_crash_is_detected_and_recovery_restored(cluster):
     incarnations = [r["incarnation"] for r in logs.events("node_start") if r["node"] == victim]
     assert len(incarnations) == 2 and incarnations[1] > incarnations[0]
     assert [r for r in logs.after("suspect", restarted_at) if r["node"] == victim] == []
+
+    # As mesmas propriedades, pelo verificador que os experimentos usam
+    time.sleep(1.0)
+    records = sorted(Logs(make("logs")).records + faults, key=lambda r: r["ts"])
+    report = check_heartbeat.check(records, strict_accuracy=True)
+    assert report.ok, check_heartbeat.format_report(report)
+    assert len(report.detections) == len(survivors) and len(report.recoveries) == len(survivors)
