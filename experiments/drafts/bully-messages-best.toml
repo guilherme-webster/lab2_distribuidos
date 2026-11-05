@@ -1,0 +1,41 @@
+# N inclui o líder morto; apenas o iniciador tem detecção rápida.
+name = "bully-messages-best"
+description = "Mensagens do Bully com iniciador second_highest"
+algorithm = "bully_messages"
+election_initiator = "second_highest"
+passive_hb_timeout_ms = 10000
+seeds = 10
+warmup_s = 3
+duration_s = 5
+
+[base]
+HB_INTERVAL_MS = 200
+HB_TIMEOUT_MS = 600
+HB_ADAPTIVE = false
+HB_TIMEOUT_STEP_MS = 200
+HB_TIMEOUT_MAX_MS = 0
+ELECTION_TIMEOUT_MS = 500
+COORD_TIMEOUT_MS = 3000
+DROP_RATE = 0.0
+DELAY_MS = 0
+JITTER_MS = 0
+
+[sweep]
+N = [3, 5, 7, 9]
+
+[[faults]]
+at_s = 0.5
+action = "kill"
+target = "max"
+
+[[plots]]
+metric = "messages_sent"
+x = "N"
+xlabel = "Número inicial de nós (N)"
+ylabel = "Mensagens de eleição enviadas"
+
+[[plots]]
+metric = "messages_received"
+x = "N"
+xlabel = "Número inicial de nós (N)"
+ylabel = "Mensagens de eleição recebidas"
