@@ -9,6 +9,7 @@ import dataclasses
 import signal
 import time
 
+from dsnode.bully import Bully
 from dsnode.clock import RealClock
 from dsnode.config import Config
 from dsnode.heartbeat import FailureDetector
@@ -25,8 +26,7 @@ async def run(cfg: Config) -> None:
     factory = MessageFactory(cfg.node_id, incarnation=time.time_ns() // 1_000_000)
     transport = UdpTransport(cfg, log)
     detector = FailureDetector(transport, clock, cfg, log, factory)
-    # Bully: criar aqui com o mesmo transport/clock/cfg/log/factory e o
-    # detector, e inscrevê-lo com detector.subscribe(on_suspect, on_restore)
+    bully = Bully(transport, clock, cfg, log, detector, factory)
 
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -35,10 +35,12 @@ async def run(cfg: Config) -> None:
 
     await transport.start()
     log.emit("node_start", incarnation=factory.incarnation, config=dataclasses.asdict(cfg))
-    await detector.start()
     try:
+        await detector.start()
+        await bully.start()
         await stop.wait()
     finally:
+        bully.stop()
         detector.stop()
         transport.close()
         log.emit("node_stop")

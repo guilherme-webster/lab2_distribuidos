@@ -105,6 +105,13 @@ class Logs:
         """Pares (receptor, remetente) com ao menos uma mensagem recebida."""
         return {(r["node"], r["peer"]) for r in self.events("msg_recv")}
 
+    def agree(self, nodes, leader: int, since: float = 0.0) -> bool:
+        """Confere o último líder anunciado por cada nó na fase atual."""
+        latest = {}
+        for record in sorted(self.after("leader_change", since), key=lambda r: r["ts"]):
+            latest[record["node"]] = record["leader"]
+        return all(node in latest and latest[node] == leader for node in nodes)
+
 
 ALL_PAIRS = set(itertools.permutations(range(1, N + 1), 2))
 
@@ -171,6 +178,11 @@ def test_no_suspicions_in_normal_operation(cluster):
         assert r["false_suspicion"] is False
 
 
+def test_bully_elects_highest_id(cluster):
+    logs = wait_logs(lambda l: l.agree(range(1, N + 1), N))
+    assert logs.agree(range(1, N + 1), N), "nós não concordaram no maior ID"
+
+
 def test_crash_is_detected_and_recovery_restored(cluster):
     """H2 + recuperação no sistema real. Altera o ambiente: roda depois dos
     testes acima (o pytest segue a ordem do arquivo)."""
@@ -189,6 +201,9 @@ def test_crash_is_detected_and_recovery_restored(cluster):
     wrong = [(r["node"], r["peer"]) for r in logs.after("suspect", killed_at) if r["peer"] != victim]
     assert wrong == [], f"falsas suspeitas após o crash (nó, suspeito): {wrong}"
 
+    logs = wait_logs(lambda l: l.agree(survivors, N - 1, killed_at))
+    assert logs.agree(survivors, N - 1, killed_at), "Bully não substituiu o líder que caiu"
+
     time.sleep(max(0.0, kill["ts"] + OUTAGE - time.time()))
     restarted_at = fault("start", victim)["issued_ts"]
     logs = wait_logs(lambda l: all(l.after("restore", restarted_at, node=i, peer=victim) for i in survivors))
@@ -199,6 +214,10 @@ def test_crash_is_detected_and_recovery_restored(cluster):
     incarnations = [r["incarnation"] for r in logs.events("node_start") if r["node"] == victim]
     assert len(incarnations) == 2 and incarnations[1] > incarnations[0]
     assert [r for r in logs.after("suspect", restarted_at) if r["node"] == victim] == []
+
+    logs = wait_logs(lambda l: l.agree(range(1, N + 1), N, restarted_at))
+    assert logs.agree(range(1, N + 1), N, restarted_at), "maior ID não retomou a liderança"
+    assert logs.events("handler_error") == []
 
     # As mesmas propriedades, pelo verificador que os experimentos usam
     time.sleep(1.0)
