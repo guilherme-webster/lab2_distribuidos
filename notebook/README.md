@@ -5,6 +5,7 @@ Os arquivos usam o formato de células `# %%` (código) e `# %% [markdown]`
 
 - `01_tempos_bully.py`: leitura, validação, estatísticas e médias com desvio-padrão.
 - `02_distribuicoes_bully.py`: boxplots, pontos de cada execução e percentis.
+- `03_timeouts_bully.py`: médias e distribuições ao variar os timeouts com N=5.
 
 Abra o repositório no VS Code com as extensões Python e Jupyter. Selecione
 `.venv/bin/python` como ambiente/kernel e use **Run Cell** sobre cada célula,
@@ -36,4 +37,12 @@ Para executar sem interface gráfica:
 ```bash
 MPLBACKEND=Agg .venv/bin/python notebook/01_tempos_bully.py
 MPLBACKEND=Agg .venv/bin/python notebook/02_distribuicoes_bully.py
+```
+
+O notebook 03 lê `runs.csv` dos experimentos `bully-timeout-election` e
+`bully-timeout-heartbeat`. As figuras vão para
+`experiments/results/bully-timeouts/notebook/`. Execute depois da coleta:
+
+```bash
+.venv/bin/python notebook/03_timeouts_bully.py
 ```
