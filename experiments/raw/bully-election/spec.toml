@@ -1,0 +1,39 @@
+# Um crash do líder por ensaio; todos os sobreviventes devem eleger N-1.
+name = "bully-election"
+description = "Tempo de eleição e de failover do Bully vs. número de nós"
+algorithm = "bully"
+seeds = 10
+warmup_s = 10
+duration_s = 8
+
+[base]
+HB_INTERVAL_MS = 200
+HB_TIMEOUT_MS = 600
+HB_ADAPTIVE = false
+HB_TIMEOUT_STEP_MS = 200
+HB_TIMEOUT_MAX_MS = 0
+ELECTION_TIMEOUT_MS = 500
+COORD_TIMEOUT_MS = 1000
+DROP_RATE = 0.0
+DELAY_MS = 0
+JITTER_MS = 0
+
+[sweep]
+N = [3, 5, 7, 9, 11, 13]
+
+[[faults]]
+at_s = 1
+action = "kill"
+target = "max"
+
+[[plots]]
+metric = "election_latency_s"
+x = "N"
+xlabel = "Número inicial de nós (N)"
+ylabel = "Início da eleição até acordo (s)"
+
+[[plots]]
+metric = "failover_latency_s"
+x = "N"
+xlabel = "Número inicial de nós (N)"
+ylabel = "Comando de falha até acordo (s)"
