@@ -30,6 +30,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import check_heartbeat  # noqa: E402
 import run_experiment  # noqa: E402
+from bully_metrics import bully_metrics  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 STATS = ["n", "mean", "std", "min", "p5", "p50", "p95", "p99", "max"]
@@ -48,6 +49,8 @@ def percentile(values: list[float], p: float) -> float:
 
 
 def describe(values: list[float]) -> dict:
+    # Ensaios inválidos não contribuem com latências para as estatísticas.
+    values = [value for value in values if math.isfinite(value)]
     if not values:
         return {s: (0 if s == "n" else math.nan) for s in STATS}
     return {
@@ -120,8 +123,7 @@ def heartbeat_metrics(records: list[dict], meta: dict) -> tuple[dict, dict]:
     return scalars, samples
 
 
-# O Bully entra aqui com sua própria função (escalares, amostras)
-METRICS = {"heartbeat": heartbeat_metrics}
+METRICS = {"heartbeat": heartbeat_metrics, "bully": bully_metrics}
 
 # Curvas teóricas que um gráfico pode desenhar como referência
 REFERENCES = {
