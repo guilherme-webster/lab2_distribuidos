@@ -54,3 +54,28 @@ Também são gerados `summary.csv` (média, desvio e percentis) e gráficos.
 Os logs comprimidos, falhas, metadados e informações da máquina ficam
 em `raw/bully-election/`, permitindo reanálise. `N` inclui o líder que
 será morto; após o crash, restam N-1 nós.
+
+## Piloto rápido: efeito dos timeouts
+
+```bash
+make experiments EXP="bully-timeout-election bully-timeout-heartbeat"
+```
+
+São 18 ensaios: N=5, três repetições por configuração, sem perdas/atrasos
+artificiais. Cada ensaio aquece por 3 s, observa 5 s e mata o líder após
+0,5 s de medição. Varia-se um fator por vez:
+
+- `bully-timeout-election`: ELECTION_TIMEOUT_MS em 200/500/1000 ms,
+  HB_TIMEOUT_MS fixo em 600 ms.
+- `bully-timeout-heartbeat`: HB_TIMEOUT_MS em 400/600/1200 ms,
+  ELECTION_TIMEOUT_MS fixo em 500 ms.
+
+HB_INTERVAL_MS=200 e COORD_TIMEOUT_MS=3000 são fixos. O timeout do
+coordenador não é avaliado: seu efeito exige um candidato que responda e
+falhe antes de anunciar o coordenador. Aqui o crash é do líder já eleito.
+
+Cada experimento gera seus próprios `runs.csv`, `summary.csv` e gráficos
+em `results/<nome>/`. `notebook/03_timeouts_bully.py` reúne as duas séries
+em gráficos de médias e distribuições, no mesmo formato de células `# %%`.
+Trata-se de um piloto com apenas três repetições, voltado a observar a
+influência dos timeouts; percentis altos devem ser interpretados com cautela.

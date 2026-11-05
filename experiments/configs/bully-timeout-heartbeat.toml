@@ -1,0 +1,38 @@
+name = "bully-timeout-heartbeat"
+description = "Efeito de HB_TIMEOUT_MS nos tempos do Bully com N=5"
+algorithm = "bully"
+seeds = 3
+warmup_s = 3
+duration_s = 5
+
+[base]
+N = 5
+HB_INTERVAL_MS = 200
+HB_ADAPTIVE = false
+HB_TIMEOUT_STEP_MS = 200
+HB_TIMEOUT_MAX_MS = 0
+ELECTION_TIMEOUT_MS = 500
+COORD_TIMEOUT_MS = 3000
+DROP_RATE = 0.0
+DELAY_MS = 0
+JITTER_MS = 0
+
+[sweep]
+HB_TIMEOUT_MS = [400, 600, 1200]
+
+[[faults]]
+at_s = 0.5
+action = "kill"
+target = "max"
+
+[[plots]]
+metric = "election_latency_s"
+x = "HB_TIMEOUT_MS"
+xlabel = "HB_TIMEOUT_MS (ms)"
+ylabel = "Início da eleição até acordo (s)"
+
+[[plots]]
+metric = "failover_latency_s"
+x = "HB_TIMEOUT_MS"
+xlabel = "HB_TIMEOUT_MS (ms)"
+ylabel = "Comando de falha até acordo (s)"
