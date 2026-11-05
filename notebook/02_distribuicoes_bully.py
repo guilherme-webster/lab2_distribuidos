@@ -77,3 +77,5 @@ plt.show()
 # Apenas dez repetições por N: os percentis altos dependem bastante dos
 # maiores valores observados. Os dados são de uma única máquina, sem perda
 # ou atraso artificial. N inclui o líder morto; há N-1 sobreviventes.
+
+# %%
