@@ -23,3 +23,7 @@ htmlcov/
 Pipfile
 # Compose gerado por `make up N=...`
 .run/
+
+exemplo_relatorio.tex
+report*
+*.zip
