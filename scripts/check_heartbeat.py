@@ -9,16 +9,21 @@ Lê eventos JSON (um por linha) dos nós e registros de falhas injetadas:
      "issued_ts": ..., "cmd_ms": ...}
 
 O efeito de uma falha acontece em algum instante entre issued_ts (comando
-disparado) e ts (comando terminado); o verificador usa issued_ts quando
-existe, então latências medidas a partir de uma falha são limites superiores,
-com incerteza de até cmd_ms.
+disparado) e ts (comando terminado). Para kill/stop/pause, o verificador usa o
+último sinal de vida da vítima nesse intervalo (o último evento que ela
+registrou), ou issued_ts se ela não registrou nada; para unpause, issued_ts.
+Com 9 nós, um docker kill chega a levar ~0,8 s, e a vítima segue viva (e
+enviando heartbeats) durante parte desse tempo. Latências medidas a partir de
+uma falha são limites superiores, com incerteza de até ts menos esse instante.
 
 O estado real de cada nó (no ar ou não) vem de node_start/node_stop e das
 falhas; ele é comparado com o que os detectores concluíram (suspect/restore):
 
 - completude: todo nó que cai (kill/stop) e fica fora por tempo suficiente é
   suspeito por todo observador no ar em até timeout + folga, e continua
-  suspeito enquanto estiver fora (permanência);
+  suspeito enquanto estiver fora (permanência). Para cada observador, a queda
+  conta a partir da chegada do último heartbeat que a vítima enviou antes de
+  cair, pois uma mensagem em trânsito ainda pode (e deve) restaurá-la;
 - precisão: uma suspeita é justificada se o suspeito, ou o próprio observador
   (ex.: pausado), esteve fora em algum instante na janela de timeout + folga
   que a antecede; senão é falsa;
@@ -79,10 +84,36 @@ def fault_ts(r: dict) -> float:
     return r.get("issued_ts", r["ts"])
 
 
+def effective_fault_ts(records: list[dict]) -> dict[int, float]:
+    """Instante em que cada falha passa a valer, indexado por id(registro).
+
+    Quedas (kill/stop/pause) valem a partir do último evento registrado pela
+    vítima até o fim do comando, se ele for posterior ao disparo: um nó que
+    ainda escreve no log está no ar.
+    """
+    logged: dict[int, list[float]] = defaultdict(list)
+    for r in records:
+        if r["event"] != "fault" and "node" in r:
+            logged[r["node"]].append(r["ts"])
+    times = {}
+    for r in records:
+        if r["event"] != "fault":
+            continue
+        t = fault_ts(r)
+        if r["action"] in DOWN_ACTIONS:
+            ts = logged.get(r["target"], [])
+            i = bisect_right(ts, r["ts"])
+            if i and ts[i - 1] > t:
+                t = ts[i - 1]
+        times[id(r)] = t
+    return times
+
+
 class Timeline:
     """Quando cada nó esteve no ar, segundo node_start/node_stop e as falhas."""
 
-    def __init__(self, records: list[dict]):
+    def __init__(self, records: list[dict], fault_times: dict[int, float] | None = None):
+        fault_times = fault_times if fault_times is not None else effective_fault_ts(records)
         changes: dict[int, list[tuple[float, bool]]] = defaultdict(list)
         for r in records:
             if r["event"] == "node_start":
@@ -91,9 +122,9 @@ class Timeline:
                 changes[r["node"]].append((r["ts"], False))
             elif r["event"] == "fault":
                 if r["action"] in DOWN_ACTIONS:
-                    changes[r["target"]].append((fault_ts(r), False))
+                    changes[r["target"]].append((fault_times[id(r)], False))
                 elif r["action"] == "unpause":
-                    changes[r["target"]].append((fault_ts(r), True))
+                    changes[r["target"]].append((fault_times[id(r)], True))
                 # "start" não muda nada: o nó só está no ar no node_start
         for c in changes.values():
             c.sort(key=lambda change: change[0])
@@ -159,7 +190,8 @@ def check(
     strict_accuracy: bool = False,
     garbage: int = 0,
 ) -> Report:
-    timeline = Timeline(records)
+    fault_times = effective_fault_ts(records)
+    timeline = Timeline(records, fault_times)
     starts = [r for r in records if r["event"] == "node_start"]
     configs = {r["node"]: r.get("config", {}) for r in starts}
     nodes = sorted(
@@ -187,6 +219,38 @@ def check(
         before = [r for r in views[(p, q)] if r["ts"] <= t]
         return before[-1] if before else None
 
+    # Heartbeats recebidos por (observador, remetente) e quando foram enviados
+    sent_at = {
+        r["msg_id"]: r["ts"] for r in records
+        if r["event"] == "msg_send" and r.get("type") == "HEARTBEAT" and "msg_id" in r
+    }
+    received: dict[tuple[int, int], list[tuple[float, str]]] = defaultdict(list)
+    for r in records:
+        if r["event"] == "msg_recv" and r.get("type") == "HEARTBEAT" and "msg_id" in r:
+            received[(r["node"], r["peer"])].append((r["ts"], r["msg_id"]))
+
+    def sent_before(p: int, q: int, t: float, t_down: float) -> bool:
+        """O último heartbeat de q recebido por p até t saiu antes da queda?"""
+        hbs = received[(p, q)]
+        i = bisect_right(hbs, (t, "\uffff"))
+        return i > 0 and sent_at.get(hbs[i - 1][1], math.inf) <= t_down
+
+    def crash_seen_by(p: int, q: int, t_down: float, horizon: float) -> float:
+        """Instante da queda de q para p: chegada do último heartbeat que q
+        enviou antes de cair (se ainda estava em trânsito) e o restore que
+        ele provocou."""
+        hbs = received[(p, q)]
+        t = t_down
+        for ts, msg_id in hbs[bisect_right(hbs, (t_down, "\uffff")):]:
+            if ts > horizon:
+                break
+            if sent_at.get(msg_id, math.inf) <= t_down:
+                t = ts
+        for r in views[(p, q)]:
+            if r["event"] == "restore" and t_down < r["ts"] <= horizon and sent_before(p, q, r["ts"], t_down):
+                t = max(t, r["ts"])
+        return t
+
     def timeout_at(p: int, q: int, t: float) -> float:
         # Com timeout adaptativo, o valor vigente é o do último evento
         last = last_view(p, q, t)
@@ -194,14 +258,16 @@ def check(
 
     # Completude e permanência
     crashes = [
-        (r["target"], fault_ts(r), r.get("cmd_ms", 0.0) / 1000) for r in records
+        (r["target"], fault_times[id(r)], max(r["ts"] - fault_times[id(r)], 0.0)) for r in records
         if r["event"] == "fault" and r["action"] in CRASH_ACTIONS
     ]
-    for q, t_crash, uncertainty in crashes:
-        t_back = timeline.next_up(q, t_crash)
+    for q, t_down, uncertainty in crashes:
+        t_back = timeline.next_up(q, t_down)
         for p in nodes:
             if p == q:
                 continue
+            horizon = min(t_back, t_down + timeout_at(p, q, t_down) + slack)
+            t_crash = crash_seen_by(p, q, t_down, horizon)
             bound = timeout_at(p, q, t_crash) + slack
             # Só cobra de quem esteve no ar durante toda a janela, e só se a
             # vítima ficou fora o suficiente para ser detectada
@@ -242,7 +308,7 @@ def check(
         if r["node"] in seen:
             returns.append((r["node"], r["ts"]))
         seen.add(r["node"])
-    returns += [(r["target"], fault_ts(r)) for r in records if r["event"] == "fault" and r["action"] == "unpause"]
+    returns += [(r["target"], fault_times[id(r)]) for r in records if r["event"] == "fault" and r["action"] == "unpause"]
     for q, t_back in returns:
         for p in nodes:
             if p == q or timeline.down_during(p, t_back, t_back + recovery_bound):
@@ -273,8 +339,10 @@ def format_report(report: Report) -> str:
             f"completude: {len(lat)} detecções, latência mín/mediana/máx = "
             f"{lat[0]:.3f}/{lat[len(lat) // 2]:.3f}/{lat[-1]:.3f} s"
         )
-    else:
+    elif not report.completeness_violations:
         lines.append("completude: nenhum crash a verificar")
+    else:
+        lines.append("completude: nenhuma detecção dentro do prazo")
     for v in report.completeness_violations:
         lines.append(f"  VIOLAÇÃO: nó {v['observer']} não suspeitou do nó {v['target']} em {v['bound_s']} s")
     for v in report.permanence_violations:

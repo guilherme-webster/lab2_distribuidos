@@ -68,37 +68,20 @@ def describe(values: list[float]) -> dict:
 
 # --- métricas por algoritmo ------------------------------------------------
 
-def last_sign_of_life(records: list[dict], node: int, until: float) -> float | None:
-    """ts do último evento registrado pelo nó até `until`."""
-    last = None
-    for r in records:
-        if r["ts"] > until:
-            break
-        if r.get("node") == node and r["event"] != "fault":
-            last = r["ts"]
-    return last
-
-
 def heartbeat_metrics(records: list[dict], meta: dict) -> tuple[dict, dict]:
     """Métricas do detector de heartbeat. Devolve (escalares, amostras)."""
     report = check_heartbeat.check(records)
     start, end = meta["measure_start_ts"], meta["measure_end_ts"]
     minutes = (end - start) / 60
     n = meta["n"]
-    faults = {(r["target"], check_heartbeat.fault_ts(r)): r for r in records if r["event"] == "fault"}
 
+    # crash_ts já é o último sinal de vida da vítima (ver check_heartbeat)
     latencies, already = [], 0
     for d in report.detections:
         if d["latency_s"] == 0:
             already += 1  # já suspeitava antes do crash: latência indefinida
             continue
-        suspect_ts = d["crash_ts"] + d["latency_s"]
-        # O crash ocorreu entre o disparo do comando e o fim dele; o último
-        # evento logado pela vítima nesse intervalo estreita a estimativa
-        fault = faults.get((d["target"], d["crash_ts"]), {})
-        sign = last_sign_of_life(records, d["target"], fault.get("ts", d["crash_ts"]))
-        crash_ts = max(d["crash_ts"], sign) if sign is not None else d["crash_ts"]
-        latencies.append(suspect_ts - crash_ts)
+        latencies.append(d["latency_s"])
 
     false_in_window = [f for f in report.false_suspicions if start <= f["ts"] <= end]
     # Taxa de heartbeats só na fase sem falhas, comparável a N(N-1)/intervalo

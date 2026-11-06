@@ -93,6 +93,64 @@ def test_fault_time_is_when_the_command_was_issued():
     assert all(d["uncertainty_s"] == 0.5 for d in report.detections)
 
 
+def test_slow_kill_counts_from_victims_last_sign_of_life():
+    # Caso real (hb-scale, N=9): o docker kill levou 0,77 s e a vítima seguiu
+    # enviando heartbeats por 0,6 s; contar o prazo do disparo seria injusto
+    kill = {**fault("kill", 3, 10.8), "issued_ts": 10.0, "cmd_ms": 800.0}
+    alive = {"ts": 10.6, "node": 3, "event": "msg_send"}
+    report = run(*BOOT, alive, kill, suspect(1, 3, 11.2), suspect(2, 3, 11.2), tick(20))
+    assert report.ok, report.completeness_violations
+    assert {d["observer"]: d["latency_s"] for d in report.detections} == pytest.approx({1: 0.6, 2: 0.6})
+    assert all(d["uncertainty_s"] == pytest.approx(0.2) for d in report.detections)
+
+
+def test_restore_before_slow_kill_takes_effect_is_not_a_violation():
+    # Caso real (hb-loss, 20%): suspeita falsa e restore legítimo enquanto o
+    # comando de kill ainda não tinha derrubado a vítima
+    kill = {**fault("kill", 3, 10.5), "issued_ts": 10.0, "cmd_ms": 500.0}
+    alive = {"ts": 10.35, "node": 3, "event": "msg_send"}
+    records = [*BOOT, suspect(1, 3, 10.1), restore(1, 3, 10.35, True), alive, kill,
+               suspect(1, 3, 10.95), suspect(2, 3, 10.95), tick(20)]
+    report = run(*records)
+    assert report.ok and report.permanence_violations == []
+    assert len(report.false_suspicions) == 1  # a de 10.1, com a vítima no ar
+
+
+def hb(src, dst, ts_send, ts_recv, msg_id):
+    return [{"ts": ts_send, "node": src, "event": "msg_send", "type": "HEARTBEAT", "peer": dst, "msg_id": msg_id},
+            {"ts": ts_recv, "node": dst, "event": "msg_recv", "type": "HEARTBEAT", "peer": src, "msg_id": msg_id}]
+
+
+def test_restore_by_heartbeat_in_flight_at_crash_is_legitimate():
+    # Caso real (hb-loss, 20%): o nó 1 suspeitou em 10.30, o último heartbeat
+    # do nó 3 saiu em 10.35 e chegou em 10.3502, depois de a vítima morrer
+    kill = {**fault("kill", 3, 10.5), "issued_ts": 10.0, "cmd_ms": 500.0}
+    records = [*BOOT, suspect(1, 3, 10.30), *hb(3, 1, 10.35, 10.3502, "3.0.9"),
+               restore(1, 3, 10.3503, True), kill, suspect(1, 3, 10.95), suspect(2, 3, 10.95), tick(20)]
+    report = run(*records)
+    assert report.ok and report.permanence_violations == []
+    detected = {d["observer"]: d for d in report.detections}
+    # Nova detecção, contada a partir do restore provocado pelo último heartbeat
+    # (e não "já suspeitava", com latência 0)
+    assert detected[1]["crash_ts"] == 10.3503
+    assert detected[1]["latency_s"] == pytest.approx(0.5997)
+
+
+def test_restore_by_heartbeat_sent_after_crash_is_still_a_violation():
+    # Um heartbeat "enviado" depois do último sinal de vida não justifica nada
+    kill = {**fault("kill", 3, 10.5), "issued_ts": 10.0, "cmd_ms": 500.0}
+    records = [*BOOT, {"ts": 10.2, "node": 3, "event": "msg_send"}, kill,
+               suspect(1, 3, 10.8), suspect(2, 3, 10.8), {"ts": 11.0, "node": 1, "event": "msg_recv",
+               "type": "HEARTBEAT", "peer": 3, "msg_id": "3.0.99"}, restore(1, 3, 11.0, True), tick(20)]
+    assert [v["observer"] for v in run(*records).permanence_violations] == [1]
+
+
+def test_unanswered_crash_is_reported_as_missing_detection():
+    report = run(*BOOT, fault("kill", 3, 10.0), tick(20))
+    text = chk.format_report(report)
+    assert "nenhuma detecção dentro do prazo" in text and "nenhum crash" not in text
+
+
 def test_restore_during_unpause_command_counts_as_recovery():
     unpause = {**fault("unpause", 3, 12.1), "issued_ts": 12.0, "cmd_ms": 100.0}
     report = run(*BOOT, fault("pause", 3, 10.0), suspect(1, 3, 10.6), suspect(2, 3, 10.6),
