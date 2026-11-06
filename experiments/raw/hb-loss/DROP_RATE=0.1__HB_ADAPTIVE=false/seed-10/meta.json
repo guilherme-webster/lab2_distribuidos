@@ -1,0 +1,32 @@
+{
+  "experiment": "hb-loss",
+  "config": "DROP_RATE=0.1__HB_ADAPTIVE=false",
+  "params": {
+    "N": 5,
+    "HB_INTERVAL_MS": 200,
+    "HB_TIMEOUT_MS": 600,
+    "DROP_RATE": 0.1,
+    "HB_ADAPTIVE": false
+  },
+  "seed": 10,
+  "n": 5,
+  "warmup_s": 5.0,
+  "duration_s": 40.0,
+  "faults_planned": [
+    {
+      "at_s": 34.0,
+      "action": "kill",
+      "target": 5
+    }
+  ],
+  "git": {
+    "commit": "f44920ea93796865676c0d7e4d71f6fd2c8c8f34",
+    "dirty": true
+  },
+  "started_at": 1793997721.5876043,
+  "complete": true,
+  "all_up_ts": 1793997723.3623302,
+  "measure_start_ts": 1793997728.3627586,
+  "measure_end_ts": 1793997768.3629777,
+  "finished_at": 1793997771.526499
+}

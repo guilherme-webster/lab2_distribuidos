@@ -1,0 +1,30 @@
+{
+  "experiment": "hb-scale",
+  "config": "N=3",
+  "params": {
+    "HB_INTERVAL_MS": 200,
+    "HB_TIMEOUT_MS": 600,
+    "N": 3
+  },
+  "seed": 8,
+  "n": 3,
+  "warmup_s": 5.0,
+  "duration_s": 20.0,
+  "faults_planned": [
+    {
+      "at_s": 12.0,
+      "action": "kill",
+      "target": 3
+    }
+  ],
+  "git": {
+    "commit": "f44920ea93796865676c0d7e4d71f6fd2c8c8f34",
+    "dirty": true
+  },
+  "started_at": 1793998857.7434454,
+  "complete": true,
+  "all_up_ts": 1793998858.9994457,
+  "measure_start_ts": 1793998863.9998744,
+  "measure_end_ts": 1793998884.0001676,
+  "finished_at": 1793998884.4703395
+}

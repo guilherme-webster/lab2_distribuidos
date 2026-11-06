@@ -1,0 +1,4 @@
+{"ts":1793993203.845659599,"event":"fault","action":"kill","target":5,"issued_ts":1793993203.240002675,"cmd_ms":605.7}
+{"ts":1793993210.763925517,"event":"fault","action":"start","target":5,"issued_ts":1793993210.239076833,"cmd_ms":524.8}
+{"ts":1793993217.635266934,"event":"fault","action":"kill","target":1,"issued_ts":1793993217.238204840,"cmd_ms":397.1}
+{"ts":1793993224.770946693,"event":"fault","action":"start","target":1,"issued_ts":1793993224.241231379,"cmd_ms":529.7}

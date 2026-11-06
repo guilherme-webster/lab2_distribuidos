@@ -1,0 +1,45 @@
+{
+  "experiment": "hb-timeout",
+  "config": "HB_TIMEOUT_MS=400",
+  "params": {
+    "N": 5,
+    "HB_INTERVAL_MS": 200,
+    "HB_TIMEOUT_MS": 400
+  },
+  "seed": 7,
+  "n": 5,
+  "warmup_s": 5.0,
+  "duration_s": 28.0,
+  "faults_planned": [
+    {
+      "at_s": 4.0,
+      "action": "kill",
+      "target": 5
+    },
+    {
+      "at_s": 11.0,
+      "action": "start",
+      "target": 5
+    },
+    {
+      "at_s": 18.0,
+      "action": "kill",
+      "target": 1
+    },
+    {
+      "at_s": 25.0,
+      "action": "start",
+      "target": 1
+    }
+  ],
+  "git": {
+    "commit": "f44920ea93796865676c0d7e4d71f6fd2c8c8f34",
+    "dirty": true
+  },
+  "started_at": 1793993343.771677,
+  "complete": true,
+  "all_up_ts": 1793993345.7981672,
+  "measure_start_ts": 1793993350.7982361,
+  "measure_end_ts": 1793993378.7983294,
+  "finished_at": 1793993380.1931977
+}
