@@ -65,8 +65,18 @@ def os_name() -> str:
     return f"{platform.system()} {platform.release()}"
 
 
+# Saídas dos próprios experimentos: gravá-las não torna o código "sujo"
+OUTPUT_DIRS = ("experiments/raw", "experiments/results")
+
+
+def git_status() -> str | None:
+    """Mudanças no código (rastreado ou não), ignorando as saídas dos experimentos."""
+    excludes = [f":(exclude){d}" for d in OUTPUT_DIRS]
+    return run("git", "status", "--porcelain", "--", ".", *excludes)
+
+
 def collect() -> dict:
-    status = run("git", "status", "--porcelain")
+    status = git_status()
     return {
         "collected_at": datetime.now(timezone.utc).isoformat(),
         "hardware": {
