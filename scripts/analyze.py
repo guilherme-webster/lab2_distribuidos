@@ -31,6 +31,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import check_heartbeat  # noqa: E402
 import run_experiment  # noqa: E402
 from bully_metrics import bully_metrics  # noqa: E402
+from bully_loss_metrics import bully_loss_metrics  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 STATS = ["n", "mean", "std", "min", "p5", "p50", "p95", "p99", "max"]
@@ -106,7 +107,7 @@ def heartbeat_metrics(records: list[dict], meta: dict) -> tuple[dict, dict]:
     return scalars, samples
 
 
-METRICS = {"heartbeat": heartbeat_metrics, "bully": bully_metrics}
+METRICS = {"heartbeat": heartbeat_metrics, "bully": bully_metrics, "bully-loss": bully_loss_metrics}
 
 # Curvas teóricas que um gráfico pode desenhar como referência
 REFERENCES = {
@@ -258,7 +259,7 @@ def plot(spec_plot: dict, summary: list[dict], out_base: Path) -> list[Path]:
     paths = []
     for ext in ("png", "pdf"):
         path = out_base.with_suffix(f".{ext}")
-        fig.savefig(path, facecolor=SURFACE)
+        fig.savefig(path, facecolor=SURFACE, bbox_inches="tight")
         paths.append(path)
     plt.close(fig)
     return paths

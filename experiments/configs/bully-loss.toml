@@ -1,0 +1,34 @@
+# Sem crashes: cada tentativa local após o aquecimento é espúria.
+name = "bully-loss"
+description = "Eleições espúrias do Bully por perda de mensagens, sem falhas de nós"
+algorithm = "bully-loss"
+seeds = 10
+warmup_s = 5
+duration_s = 30
+
+[base]
+N = 5
+HB_INTERVAL_MS = 200
+HB_TIMEOUT_MS = 600
+HB_ADAPTIVE = false
+HB_TIMEOUT_STEP_MS = 200
+HB_TIMEOUT_MAX_MS = 0
+ELECTION_TIMEOUT_MS = 500
+COORD_TIMEOUT_MS = 1000
+DELAY_MS = 0
+JITTER_MS = 0
+
+[sweep]
+DROP_RATE = [0.0, 0.05, 0.1, 0.2]
+
+[[plots]]
+metric = "spurious_elections"
+x = "DROP_RATE"
+xlabel = "Taxa de perda"
+ylabel = "Tentativas locais espúrias em 30 s (sistema)"
+
+[[plots]]
+metric = "spurious_election_rate"
+x = "DROP_RATE"
+xlabel = "Taxa de perda"
+ylabel = "Tentativas locais espúrias por minuto (sistema)"
