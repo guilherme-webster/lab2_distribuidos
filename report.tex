@@ -1,0 +1,538 @@
+% =====================================================================
+% Relatório do Trabalho 2 — MC714 (2s2026)
+% Template IEEE
+% =====================================================================
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts % permite \thanks no título
+
+% --- Idioma e codificação ---
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[brazil]{babel}
+
+% --- Matemática, figuras, tabelas ---
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{array}
+\usepackage{stfloats}   % permite figure*/table* no rodapé da página
+\usepackage{placeins}   % \FloatBarrier
+\usepackage{tikz}
+\usetikzlibrary{fit,positioning}
+
+% --- Referências e links ---
+\usepackage{cite}
+\usepackage{url}
+\usepackage{xcolor}
+\usepackage[hidelinks]{hyperref} % deixar por último
+
+% --- Nomes em português no estilo IEEE ---
+\renewcommand{\IEEEkeywordsname}{Palavras-chave}
+
+% =====================================================================
+% Macros de rascunho
+% =====================================================================
+% \rascunhotrue  -> marcadores \todo aparecem em vermelho no PDF
+% \rascunhofalse -> marcadores somem (use para conferir a versão final;
+%                   antes de entregar, não deve sobrar nenhum \todo no .tex)
+\newif\ifrascunho
+\rascunhotrue
+\DeclareRobustCommand{\todo}[1]{\ifrascunho{\color{red}\textbf{[#1]}}\fi}
+% Célula de tabela ainda não preenchida
+\DeclareRobustCommand{\tbd}{\ifrascunho{\color{red}?}\fi}
+
+% Links obrigatórios da 1ª página (trocar o \todo por \url{...})
+\newcommand{\repolink}{https://github.com/guilherme-webster/lab2_distribuidos}
+\newcommand{\videolink}{\todo{URL do vídeo}}
+
+% Overleaf: envie report.tex e images/ para a raiz do projeto e selecione
+% report.tex como documento principal. Também aceita a estrutura report/report.tex.
+\IfFileExists{images/bully-tempos-n.pdf}
+  {\newcommand{\figdir}{images}}
+  {\newcommand{\figdir}{../images}}
+\newcommand{\resfig}[2][\columnwidth]{\includegraphics[width=#1]{\figdir/#2}}
+
+% Atalhos de notação (opcionais)
+\newcommand{\param}[1]{\texttt{\detokenize{#1}}} % nomes de parâmetros/env
+\newcommand{\evento}[1]{\texttt{\detokenize{#1}}} % nomes de eventos de log
+
+\begin{document}
+
+% =====================================================================
+% Título, autores e links (1ª página: nomes, RAs, GitLab, vídeo)
+% =====================================================================
+\title{Detecção de Falhas por Heartbeat e Eleição de
+Líder por \textit{Bully}: Implementação e
+Avaliação Experimental
+\thanks{Repositório: \repolink. Vídeo: \videolink.}
+}
+
+\author{
+\IEEEauthorblockN{Guilherme Webster Chamoun (RA 257111)}
+\IEEEauthorblockA{Instituto de Computação \\ Universidade Estadual de Campinas \\ g257111@dac.unicamp.br}
+\and
+\IEEEauthorblockN{Gabriel Cunha Marchetti (RA 251055)}
+\IEEEauthorblockA{Instituto de Computação \\ Universidade Estadual de Campinas \\ g251055@dac.unicamp.br}
+}
+
+\maketitle
+\begin{abstract}
+Foram implementados dois algoritmos distribuídos clássicos que, de certa forma, se complementam: um detector de falhas por \textit{heartbeat}, com \textit{timeout} fixo ou adaptativo, e a eleição de líder pelo algoritmo do \textit{Bully}, disparada quando o detector suspeita do líder. Cada nó é um contêiner independente que se comunica apenas por datagramas UDP. A correção é verificada por testes determinísticos em um simulador e por verificadores reprodutíveis sobre os logs. Em 78 ensaios com Docker, todos os sobreviventes convergiram para o maior ID ativo. Com resposta configurada em 500\,ms, a eleição levou em média entre 501,3 e 502,0\,ms para $N\in\{3,5,7,9,11,13\}$. O tempo médio entre o comando de falha e o acordo ficou entre 1,004 e 1,065\,s. Em 80 ensaios simulados controlados, o custo foi $N$ mensagens no melhor caso e $N(N-1)$ no pior, para $N\in\{3,5,7,9\}$.
+\end{abstract}
+
+% =====================================================================
+\section{Introdução}
+\label{sec:intro}
+% =====================================================================
+
+Em vários contextos, é importante um algoritmo que escolhe um nó que é de certa forma "especial". No contexto de sistemas \textit{peer to peer}, por exemplo, é conveniente um super \textit{peer} para evitar comunicação excessiva, uma melhor garantia nos recursos disponíveis para atender demais nós, etc. De todo modo, outro aspecto importante é a dinâmica do sistema: e se um super \textit{peer} sair ou falhar? Isto precisa ser detectado de maneira a eleger um novo, sendo assim uma necessidade importante, é saber distinguir um nó morto de um nó lento e a concordância entre os nós de quem será o novo líder para gerar estados consistentes do sistema.
+
+Neste trabalho, implementamos um algoritmo para cada um dos dois problemas apresentados. Detecção de falhas por \textit{heartbeat} e eleição de líder por \textit{bully}. Os dois se integram em um serviço com líder tolerante a falhas: o detector observa o líder e, ao suspeitar dele, dispara uma eleição.
+
+As contribuições são: (i) a implementação dos dois algoritmos a partir de um transporte UDP próprio, sem bibliotecas que já os implementem; (ii) um simulador determinístico de rede e relógio, usado para testar propriedades de correção sob perda, partição e queda; (iii) verificadores de propriedades sobre os logs das execuções reais; e (iv) uma avaliação experimental automatizada e reproduzível, que relaciona os tempos medidos aos \textit{timeouts} e o número de mensagens à complexidade do algoritmo.
+
+% =====================================================================
+\section{Modelo do Sistema}
+\label{sec:modelo}
+% =====================================================================
+
+O sistema tem $N \ge 3$ processos com identificadores inteiros distintos $1..N$, conhecidos por todos. A Tabela~\ref{tab:modelo} resume as hipóteses de cada algoritmo; as subseções justificam as escolhas.
+
+\begin{table}[t]
+\centering
+\caption{Modelo do sistema adotado por algoritmo.}
+\label{tab:modelo}
+\footnotesize
+\begin{tabular}{>{\raggedright\arraybackslash}p{0.17\columnwidth}
+                >{\raggedright\arraybackslash}p{0.35\columnwidth}
+                >{\raggedright\arraybackslash}p{0.33\columnwidth}}
+\toprule
+ & \textbf{Heartbeat} & \textbf{Bully} \\
+\midrule
+Tempo & parcialmente síncrono (limites válidos após um GST desconhecido) & síncrono: \textit{timeouts} supõem limites conhecidos \\
+Canais & UDP: perda, duplicação e reordenação possíveis & idem; perdas tratadas por \textit{timeout} e nova tentativa \\
+Falhas & \textit{crash-stop}, \textit{crash-recovery}, nó lento (pausa) & \textit{crash-stop}, \textit{crash-recovery} \\
+Relógios & só relógio monotônico local & idem \\
+Persistência & nenhuma; reinício gera nova encarnação & nenhuma; nó reiniciado convoca eleição \\
+Segurança & precisão: nenhum nó correto suspeito (forte sem perdas; eventual com adaptativo) & acordo: após estabilizar, todos os corretos têm o mesmo líder, o maior ID vivo \\
+Vivacidade & completude forte: todo nó que cai passa a ser suspeito, de forma permanente, por todo nó correto & terminação: após a queda do líder, um novo líder é eleito em tempo limitado \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Detector de falhas por heartbeat}
+\label{sec:modelo-hb}
+
+Adotamos sincronia parcial: existem limites para o atraso das mensagens e para a velocidade relativa dos processos, mas eles são desconhecidos ou só valem após um instante de estabilização (GST). Nesse modelo, o detector não consegue ser perfeito; ele usa \textit{timeouts} e pode suspeitar erradamente de um nó lento. A precisão depende então da configuração. 
+
+Com \textit{timeout} fixo $T$ e intervalo $\Delta$, não há falsas suspeitas enquanto nenhum atraso exceder $T-\Delta$. Com perdas, falsas suspeitas acontecem indefinidamente, mas cada uma é desfeita pelo próximo \textit{heartbeat}. Com \textit{timeout} adaptativo sem teto, cada falsa suspeita aumenta o \textit{timeout} daquele par; depois do GST, isso ocorre um número finito de vezes sob limites estáveis de comunicação e processamento, o que permite precisão eventual. Ademais, um nó que cai deixa de enviar \textit{heartbeats} e é suspeito por todo nó correto em até $T$ mais o atraso de rede, sem restauração posterior.
+
+Não há relógio sincronizado: cada nó mede \textit{timeouts} com seu relógio monotônico. Um nó que reinicia volta sem estado e com uma nova \textit{encarnação} (o instante de início em ms). Assim, os demais conseguem distinguir um reinício de uma falsa suspeita.
+
+\subsection{Eleição Bully}
+\label{sec:modelo-bully}
+
+O algoritmo do \textit{Bully} supõe um sistema síncrono: um \textit{timeout} sem resposta significa que o destinatário falhou. Mantemos essa hipótese e avaliamos o algoritmo nas condições em que ela vale, sem perdas artificiais. Quando ela é violada (perda alta, nó pausado, partição), o algoritmo pode eleger líderes diferentes em lados distintos (\textit{split-brain}). A propriedade de segurança é, portanto, de acordo \emph{apos a estabilização}, e não em todo instante. Durante a eleição, nós diferentes podem conhecer líderes diferentes ou nenhum. Nenhum estado é persistido; o nó que reinicia convoca uma eleição e, se tiver o maior ID, retoma a lideranca.
+
+% =====================================================================
+\section{Arquitetura}
+\label{sec:arquitetura}
+% =====================================================================
+
+Cada nó lógico é um contêiner independente, orquestrado pelo Docker Compose v2. O arquivo \texttt{compose.yaml} é gerado para qualquer $N$ por um script. Os nós só se comunicam pela rede do Compose, e toda a configuração (identificador, \textit{peers}, \textit{timeouts}, injeção de falhas, semente) vem de variáveis de ambiente. Assim, o mesmo código pode rodar em outro ambiente alterando apenas a configuração. A Fig.~\ref{fig:arquitetura} mostra os componentes de um nó.
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[font=\scriptsize, >=stealth,
+  layer/.style={draw, minimum width=3.2cm, minimum height=0.42cm, align=center, fill=white},
+  ext/.style={draw, rounded corners=2pt, align=center, minimum height=0.6cm}]
+  \node[layer] (bully) at (0,1.0) {Eleição Bully};
+  \node[layer] (hb)    at (0,0.5) {Detector de \textit{heartbeat}};
+  \node[layer] (tr)    at (0,0.0) {Transporte UDP + injeção de falhas};
+  \node[draw, thick, fit=(bully)(hb)(tr), inner sep=4pt,
+        label={[font=\scriptsize]above:contêiner do nó $i$}] (ci) {};
+  \node[ext, dashed] (pj) at (4.1,0.75) {nó $j$};
+  \node[ext, dashed] (pk) at (4.1,-0.05) {nó $k$};
+  \draw[<->] (ci.east |- pj) -- node[above]{UDP/JSON} (pj.west);
+  \draw[<->] (ci.east |- pk) -- (pk.west);
+  \node[ext] (logs) at (0,-1.25) {logs JSON (stdout)};
+  \node[ext] (an) at (3.6,-1.25) {verificadores\\e análise};
+  \node[ext] (flt) at (3.6,-2.15) {\texttt{faults.sh}\\(kill/stop/pause)};
+  \draw[->] (ci.south) -- (logs.north);
+  \draw[->] (logs) -- (an);
+  \draw[->] (flt.west) -| node[pos=0.25, below]{falhas} ([xshift=-1.2cm]ci.south);
+  \draw[->] (flt) -- node[right]{\texttt{faults.jsonl}} (an);
+\end{tikzpicture}
+\caption{Arquitetura de um nó. O detector notifica o Bully por \textit{callbacks}; os logs e o registro de falhas alimentam os verificadores e a análise.}
+\label{fig:arquitetura}
+\end{figure}
+
+\subsection{Transporte e mensagens}
+\label{sec:transporte}
+
+As mensagens são objetos JSON em datagramas UDP, com tipo (\texttt{HEARTBEAT}, \texttt{ELECTION}, \texttt{ANSWER}, \texttt{COORDINATOR}), remetente, destinatário, identificador único e carga útil. Escolhemos UDP porque \textit{heartbeats} são naturalmente datagramas e porque o canal fica explicitamente sujeito a perdas, duplicação e reordenação: os algoritmos tratam essas falhas em vez de depender de garantias do TCP. O envio é \textit{best-effort} e nunca bloqueia. Erros de rede viram eventos \evento{msg_drop}, e a resolução de nomes tem \textit{timeout} explícito (0,5\,s) e \textit{cache} curto, já que um contêiner reiniciado pode mudar de IP. Cada algoritmo registra um \textit{handler} por tipo de mensagem.
+
+\subsection{Injeção de falhas}
+\label{sec:falhas}
+
+Usamos dois níveis de falhas. No nível da aplicação, o transporte descarta mensagens com probabilidade \param{DROP_RATE}, atrasa-as por \param{DELAY_MS} mais um valor uniforme em $[0,$ \param{JITTER_MS}$]$ e pode bloquear destinos para simular partições. Os sorteios usam um gerador semeado por \param{SEED} e pelo ID do nó. No nível do contêiner, o script \texttt{faults.sh} executa \texttt{docker kill} (\textit{crash-stop}), \texttt{stop}/\texttt{start} (\textit{crash-recovery}) e \texttt{pause}/\texttt{unpause} (nó lento) e registra em \texttt{faults.jsonl} o instante em que cada comando foi disparado e concluído. Preferimos esses mecanismos ao \texttt{tc}/\texttt{netem} porque são reprodutíveis por semente e não exigem privilégios (\texttt{NET\_ADMIN}) nos contêineres.
+
+\subsection{Observabilidade}
+\label{sec:logs}
+
+Cada nó emite um evento JSON por linha (\evento{suspect}, \evento{restore}, \evento{election_start}, \evento{leader_change}, \evento{msg_send}, entre outros), com carimbo de tempo. Os logs servem ao mesmo tempo de evidência de correção e de fonte para as métricas. Como todos os contêineres compartilham o relógio do mesmo hospedeiro, os carimbos são comparáveis entre nós; em máquinas distintas, isso exigiria sincronização de relógios.
+
+% =====================================================================
+\section{Algoritmos}
+\label{sec:algoritmos}
+% =====================================================================
+
+\subsection{Detector de falhas por heartbeat}
+\label{sec:alg-hb}
+
+A cada $\Delta$ = \param{HB_INTERVAL_MS}, cada nó envia um \textit{heartbeat} a todos os demais com o par (encarnacao, sequencia). Para cada \textit{peer}, o receptor mantém um temporizador de duração $T$ = \param{HB_TIMEOUT_MS}, reiniciado a cada \textit{heartbeat} novo. \textit{Heartbeats} com par menor ou igual ao último aceito são descartados, pois uma mensagem atrasada ou duplicada não prova que o \textit{peer} está vivo agora. 
+
+Quando o temporizador expira, o \textit{peer} passa a ser suspeito (\evento{suspect}). Um \textit{heartbeat} de um suspeito o restaura (\evento{restore}). Se a encarnação for a mesma, a suspeita era falsa; se for nova, o nó reiniciou.
+
+No modo adaptativo, cada falsa suspeita soma \param{HB_TIMEOUT_STEP_MS} (200\,ms) ao timeout daquele \textit{peer}, até um teto opcional. Assim, os pares com canal ruim passam a ser vigiados com mais tolerância, sem afetar os demais.
+
+\subsection{Eleição Bully}
+\label{sec:alg-bully}
+
+Um nó inicia uma eleição ao subir, ao suspeitar do líder ou ao ver voltar um nó de ID maior que o lider corrente. Ele envia \texttt{ELECTION} a todos os nós de ID maior, inclusive aos suspeitos, já que suspeita não é, ainda, falha. Em seguida, espera \texttt{ANSWER} por até \param{ELECTION_TIMEOUT_MS}. Sem resposta, declara-se líder e envia \texttt{COORDINATOR} a todos. Com resposta, espera o \texttt{COORDINATOR} por até \param{COORD_TIMEOUT_MS} e, se ele não chegar, reinicia a eleição. Quem recebe \texttt{ELECTION} de um nó menor responde \texttt{ANSWER} e inicia a própria eleição; se já for o líder, reenvia o anúncio, o que recupera um \texttt{COORDINATOR} perdido. 
+
+Cada tentativa tem um \texttt{election\_id}, usado para descartar respostas antigas e correlacionar eventos. Um nó aceita apenas uma tentativa por vez: pedidos recebidos durante uma eleicao não criam tentativas paralelas. Anúncios de um coordenador menor são contestados com nova eleição, e um anúncio atrasado não substitui um líder maior que ainda não é suspeito.
+
+Reiterando, se houver uma "barreira", por exemplo, de modo que o nó 1 não veja os demais, num cenário de 4 nós, ele irá se autodeclarar líder pois vai entender que os nós maiores falharam e isto só será resolvido quando a comunicação dele  com os demais for reestabelecida. Vale notar que, ainda que o \textit{split brain} tenha sido resolvido, as possíveis mudanças que o nó 1 fez enquanto se achava líder não o são.
+
+\subsection{Integração}
+\label{sec:integracao}
+
+O Bully se inscreve no detector. Uma suspeita sobre o líder dispara \texttt{start\_election("leader\_suspected")}, e a restauração de um nó maior que o líder dispara \texttt{start\_election("peer\_restored")}. O detector modulariza erros e inscritos, de modo que uma falha no Bully não interrompe a detecção.
+
+\subsection{Complexidade de mensagens}
+\label{sec:complexidade}
+
+O detector \textit{all-to-all} envia $N(N-1)$ mensagens por intervalo, ou $N(N-1)/\Delta$ mensagens por segundo: custo $O(N^2)$. No Bully, contando todos os envios, inclusive ao líder morto, o melhor caso envia uma \texttt{ELECTION} e $N-1$ mensagens \texttt{COORDINATOR}, totalizando $N$: $O(N)$. Quando o menor ID inicia a eleição e ela se propaga aos maiores, são $N(N-1)/2$ mensagens \texttt{ELECTION}, $(N-1)(N-2)/2$ respostas e $N-1$ anúncios: total $N(N-1)$, ou $O(N^2)$. O detector pode disparar eleições em vários nós; por isso, a comparação isolada dos casos usa notificações controladas no simulador (Seção~\ref{sec:parametros}).
+
+% =====================================================================
+\section{Correção e Testes}
+\label{sec:correcao}
+
+\subsection{Testes e verificação dos logs}
+\label{sec:testes}
+\label{sec:verificadores}
+
+Os 196 testes de \texttt{make test} passaram (5,66\,s). Transporte em memória, relógio virtual e sementes fixas verificam suspeita/restauração, quedas, recuperação, duplicação e eleições. Os nove testes Docker definidos não foram executados nesta validação.
+
+O \texttt{check\_heartbeat.py} cruza logs e falhas: exige detecção até $T+500$\,ms, nenhuma restauração durante a queda e restauração após o retorno. Os novos ensaios verificaram 240 detecções e 240 restaurações, sem violações. Nos 78 ensaios anteriores de failover, o Bully apresentou acordo inicial e final, sem reinícios dos sobreviventes ou erros de handler.
+
+\subsection{Verificação experimental do heartbeat}
+\label{sec:hb-experimentos}
+
+Usamos $\Delta=200$\,ms, detector fixo, dez sementes por configuração e 5\,s de aquecimento. Para $N=5$ e $T\in\{2,3,5\}\Delta$, cada ensaio observa duas quedas/retornos em 28\,s: 80 detecções por timeout (Tabela~\ref{tab:hb-percentis}). A latência é estimada desde o último sinal de vida da vítima durante o comando Docker; o crash exato permanece incerto. As 80 observações compartilham dez execuções. Percentis usam interpolação linear; DP é amostral.
+
+\begin{table}[t]
+\centering
+\caption{Latência estimada de detecção (ms); 80 observações por timeout, provenientes de dez sementes.}
+\label{tab:hb-percentis}
+\footnotesize
+\begin{tabular}{lrrrrr}
+\toprule
+$T$ & \textbf{Média} & \textbf{DP} & \textbf{p50} & \textbf{p95} & \textbf{p99} \\
+\midrule
+$2\Delta$ & 316,5 & 51,3 & 325,7 & 389,0 & 401,7 \\
+$3\Delta$ & 534,6 & 53,1 & 536,6 & 600,9 & 601,4 \\
+$5\Delta$ & 927,1 & 56,1 & 925,5 & 1000,6 & 1000,8 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[t]
+\centering
+\resfig{heartbeat-resultados.pdf}
+\caption{Heartbeat: (a) falsas suspeitas por minuto do sistema, $N=5$; (b) mensagens/s comparadas a $N(N-1)/\Delta$. Pontos e barras representam média e $\pm1$ DP entre dez sementes.}
+\label{fig:hb-consolidado}
+\end{figure}
+
+Para precisão, reanalisamos eventos \evento{suspect} dos 40 ensaios sem crashes de \texttt{bully-loss}: $N=5$, $T=3\Delta$, observação de 30\,s, excluindo aquecimento. Todos são falsos positivos: médias de 0,0; 12,4; 50,0; 190,6 por minuto do sistema para perdas de 0\%, 5\%, 10\%, 20\%. A taxa por par dirigido divide esses valores por 20. Suspeitas e tentativas de eleição são contagens distintas.
+
+Na escala, 40 novos ensaios mediram apenas envios \texttt{HEARTBEAT}, durante 12\,s sem falhas ou perdas. Para $N\in\{3,5,7,9\}$, as médias foram 30,0; 100,0; 209,7; 359,1 mensagens/s, próximas a $N(N-1)/\Delta$ (Fig.~\ref{fig:hb-consolidado}). Os resultados mostram detecção mais lenta com timeout maior, precisão menor sob perdas e custo quadrático; limitam-se ao sistema integrado em uma máquina, sem avaliar adaptação.
+
+% =====================================================================
+\section{Metodologia Experimental}
+\label{sec:metodologia}
+% =====================================================================
+
+\subsection{Ambiente}
+\label{sec:ambiente}
+
+Os três experimentos de tempos com Docker têm o mesmo hardware e versões registrados em seus arquivos \texttt{env.json} (Tabela~\ref{tab:ambiente}); portanto, essa descrição se aplica aos 78 ensaios disponíveis, sem inferir o ambiente de outros experimentos. A simulação de mensagens registra Python 3.12.16, kernel 6.19.9-arch1-1 e commit \texttt{f44920e}, com alterações locais; CPU e memória não foram registradas nesse conjunto. Os tempos da simulação são virtuais. A varredura de perdas registra CPU 13th Gen Intel(R) Core(TM) i5-13420H, 15.32 GiB de RAM, kernel 6.19.9-arch1-1, Docker 29.3.1, Compose 5.1.1 e commit \texttt{f44920e}, com alterações locais.
+
+\begin{table}[t]
+\centering
+\caption{Ambiente de execução dos experimentos.}
+\label{tab:ambiente}
+\footnotesize
+\begin{tabular}{ll}
+\toprule
+\textbf{Item} & \textbf{Valor} \\
+\midrule
+CPU                    & Intel Core i5-13420H (12 CPUs lógicas) \\
+Memória                & 15,32 GiB \\
+Sistema operacional    & Arch Linux, x86\_64 \\
+Kernel                 & 6.19.9-arch1-1 \\
+Docker / Compose       & 29.3.1 / 5.1.1 \\
+Python (imagem)        & 3.12.16 \\
+Commit avaliado        & \texttt{eacbbf8}, com alterações locais \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Métricas}
+\label{sec:metricas}
+
+Sejam $t_f$ o instante anterior ao comando Docker de falha, $t_e$ o primeiro evento \evento{election_start} após esse comando e $t_a$ o início do último período de acordo em $N-1$ que persiste até o fim da observação. Medimos $L_e=t_a-t_e$ (eleição), $L_f=t_a-t_f$ (\textit{failover}) e $L_d=t_e-t_f$ (comando até início da eleição). Essa decomposição identifica qual espera domina a recuperação: $L_f=L_d+L_e$. Como $t_f$ não é o instante exato do \textit{crash}, $L_d$ inclui o custo de execução do comando e não é uma latência pura do detector.
+
+O custo de mensagens soma todos os envios \texttt{ELECTION}, \texttt{ANSWER} e \texttt{COORDINATOR} após a queda, inclusive ao nó morto; exclui \textit{heartbeats} e inicialização. Uma eleição corresponde aqui à substituição completa do líder, reunindo as tentativas locais dos diferentes candidatos. Reportamos média, desvio-padrão amostral (DP), mediana e percentis 95 e 99. Nos ensaios Docker, os percentis usam interpolação linear; com apenas três repetições, os percentis de cauda têm caráter exploratório.
+
+\subsection{Experimentos e parâmetros}
+\label{sec:parametros}
+
+A Tabela~\ref{tab:experimentos} resume os conjuntos concluídos. Nos ensaios Docker de tempos não há perda ou atraso artificial e o detector usa \textit{timeout} fixo. O líder $N$ é morto 1\,s após o aquecimento na varredura de $N$, e 0,5\,s após o aquecimento nas varreduras de \textit{timeout}. Os ensaios variam uma dimensão por vez e usam sementes registradas.
+
+Na contagem simulada, a rede tem atraso fixo de 5\,ms, sem perda ou \textit{jitter}. Após 10\,s virtuais de aquecimento, $N$ cai e a observação continua por 8\,s. Todos os detectores registram a suspeita normalmente, mas um adaptador notifica imediatamente o Bully apenas em $N-1$ (melhor caso) ou em 1 (pior). Os demais callbacks são atrasados em 2\,s, permitindo que a eleição se propague por \texttt{ELECTION}. Manter a suspeita interna nos demais detectores é necessário para aceitar um coordenador menor que o líder anterior. O código dos algoritmos permanece inalterado. As dez sementes verificam reprodutibilidade: sem perda ou \textit{jitter}, não introduzem variabilidade de rede.
+
+\begin{table*}[t]
+\centering
+\caption{Experimentos: parâmetro variado, níveis, valores fixos e protocolo.}
+\label{tab:experimentos}
+\footnotesize
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{llllcccl}
+\toprule
+\textbf{Experimento} & \textbf{Métricas} & \textbf{Variado} & \textbf{Níveis} &
+\textbf{Rep.} & \textbf{Aquec. (s)} & \textbf{Obs. (s)} & \textbf{Fixos (ms)} \\
+\midrule
+Bully: escala & $L_e,L_f,L_d$ & $N$ & 3, 5, 7, 9, 11, 13 & 10 & 10 & 8 & $\Delta=200,T=600,E=500,C=1000$ \\
+Bully: resposta & $L_e,L_f,L_d$ & $E$ (ms) & 200, 500, 1000 & 3 & 3 & 5 & $N=5,\Delta=200,T=600,C=3000$ \\
+Bully: detecção & $L_e,L_f,L_d$ & $T$ (ms) & 400, 600, 1200 & 3 & 3 & 5 & $N=5,\Delta=200,E=500,C=3000$ \\
+Bully: mensagens (sim.) & envios por eleição & $N$, iniciador & 3, 5, 7, 9; $N-1$ ou 1 & 10 & 10 & 8 & $\Delta=200,T=600,E=500,C=1000$ \\
+Bully: perdas & tentativas espúrias & perda & 0\%, 5\%, 10\%, 20\% & 10 & 5 & 30 & $N=5,\Delta=200,T=600,E=500,C=1000$ \\
+\bottomrule
+\end{tabular}}
+
+\smallskip
+\parbox{\textwidth}{\scriptsize $\Delta$: intervalo de heartbeat; $T$: timeout do detector; $E$: espera por ANSWER; $C$: espera por COORDINATOR. Aquecimento e observação da simulação são tempos virtuais.}
+\end{table*}
+
+\subsection{Reprodutibilidade}
+\label{sec:reprodutibilidade}
+
+Para os ensaios Docker: \texttt{make experiments EXP=bully-election}, \texttt{EXP=bully-timeout-election} e \texttt{EXP=bully-timeout-heartbeat}. Para eleições espúrias: \texttt{make experiments EXP=bully-loss}. A contagem controlada é reproduzida por \texttt{python scripts/run\_bully\_messages.py}. Os diretórios \texttt{experiments/raw/} guardam logs comprimidos, configuração, sementes, identificação do código e ambiente; \texttt{experiments/results/} contém os CSVs por ensaio e os agregados. As tabelas deste relatório usam os arquivos \texttt{summary.csv}. Os gráficos de tempos foram produzidos pelos scripts em \texttt{notebook/}.
+
+% =====================================================================
+\section{Resultados e Discussão}
+\label{sec:resultados}
+% =====================================================================
+
+\subsection{Detector de falhas por heartbeat}
+\label{sec:res-hb}
+
+Os resultados disponíveis permitem avaliar a etapa anterior à eleição no experimento integrado, com $N=5$ e $\Delta=200$\,ms. Ao elevar o \textit{timeout} do detector de 400 para 600 e 1200\,ms, o tempo médio do comando de falha até o início da eleição passou de 0,4291 para 0,5285 e 1,1505\,s (Tabela~\ref{tab:res-hb}). O aumento é compatível com maior espera para suspeitar do líder. O custo do comando Docker e a fase dos \textit{heartbeats} contribuem para a variação; esses valores não devem ser comparados diretamente a um limite de detecção contado a partir do instante exato do \textit{crash}.
+
+\begin{table}[t]
+\centering
+\caption{Comando de falha até início da eleição, $L_d$ (s), por timeout do detector $T$ (ms). Dados do experimento integrado, $N=5$.}
+\label{tab:res-hb}
+\footnotesize
+\begin{tabular}{lrrrrrr}
+\toprule
+\textbf{Config.} & $n$ & \textbf{Média} & \textbf{DP} & \textbf{p50} & \textbf{p95} & \textbf{p99} \\
+\midrule
+$T=400$ & 3 & 0,4291 & 0,0903 & 0,4184 & 0,5137 & 0,5222 \\
+$T=600$ & 3 & 0,5285 & 0,0132 & 0,5270 & 0,5409 & 0,5422 \\
+$T=1200$ & 3 & 1,1505 & 0,0455 & 1,1517 & 1,1910 & 1,1945 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Não estão disponíveis neste conjunto os dados brutos ou agregados das varreduras específicas de perda, comparação entre detector fixo e adaptativo e escala de mensagens de \textit{heartbeat}. Por isso, não são apresentados valores de falsas suspeitas ou gráficos desses experimentos. O custo $N(N-1)/\Delta$ é uma previsão analítica, ainda sem medição específica incluída aqui.
+
+\subsection{Eleição Bully}
+\label{sec:res-bully}
+
+A Fig.~\ref{fig:bully-n} e a Tabela~\ref{tab:res-bully} mostram os 60 ensaios de variação de $N$. Com espera por resposta de 500\,ms, as médias da eleição ficaram entre 501,3 e 502,0\,ms, e o DP entre 0,34 e 0,55\,ms. O pequeno aumento com $N$ é muito inferior ao tempo de espera configurado. Nessas condições, a eleição é dominada pelo \textit{timeout}:
+\begin{equation}
+L_e \approx E + T_{\text{comunicação/processamento}}.
+\end{equation}
+O \textit{failover} médio variou entre 1,004 e 1,065\,s, com DP de 54,6 a 95,7\,ms. A parcela anterior à eleição explica a maior parte dessa variabilidade; o número de nós, isoladamente, não produziu crescimento monotônico no \textit{failover}.
+
+\begin{figure*}[t]
+\centering
+\resfig[0.92\textwidth]{bully-tempos-n.pdf}
+\caption{Tempos de eleição e de failover por número inicial de nós, em Docker. Cada ponto resume dez ensaios; barras indicam $\pm1$ DP amostral. A referência de 500\,ms corresponde à espera por ANSWER. Os painéis usam escalas verticais próprias.}
+\label{fig:bully-n}
+\end{figure*}
+
+\begin{table}[t]
+\centering
+\caption{Tempos do Bully (s) por número inicial de nós. Dez ensaios por configuração; percentis com interpolação linear.}
+\label{tab:res-bully}
+\footnotesize
+\begin{tabular}{lrrrrrr}
+\toprule
+\textbf{Config.} & $n$ & \textbf{Média} & \textbf{DP} & \textbf{p50} & \textbf{p95} & \textbf{p99} \\
+\midrule
+\multicolumn{7}{l}{\textit{Início da eleição até acordo ($L_e$)}} \\
+$N=3$ & 10 & 0,5013 & 0,0006 & 0,5011 & 0,5022 & 0,5026 \\
+$N=5$ & 10 & 0,5013 & 0,0005 & 0,5014 & 0,5020 & 0,5021 \\
+$N=7$ & 10 & 0,5014 & 0,0004 & 0,5013 & 0,5019 & 0,5021 \\
+$N=9$ & 10 & 0,5018 & 0,0004 & 0,5018 & 0,5023 & 0,5025 \\
+$N=11$ & 10 & 0,5017 & 0,0003 & 0,5016 & 0,5022 & 0,5023 \\
+$N=13$ & 10 & 0,5020 & 0,0005 & 0,5019 & 0,5027 & 0,5030 \\
+\midrule
+\multicolumn{7}{l}{\textit{Comando de falha até acordo ($L_f$)}} \\
+$N=3$ & 10 & 1,0039 & 0,0635 & 0,9804 & 1,1073 & 1,1666 \\
+$N=5$ & 10 & 1,0646 & 0,0957 & 1,0432 & 1,1815 & 1,1879 \\
+$N=7$ & 10 & 1,0418 & 0,0546 & 1,0308 & 1,1309 & 1,1342 \\
+$N=9$ & 10 & 1,0567 & 0,0804 & 1,0127 & 1,1865 & 1,2153 \\
+$N=11$ & 10 & 1,0556 & 0,0582 & 1,0389 & 1,1405 & 1,1452 \\
+$N=13$ & 10 & 1,0637 & 0,0622 & 1,0561 & 1,1475 & 1,1555 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+A varredura exploratória dos \textit{timeouts}, com três ensaios por configuração, confirma a separação entre as duas esperas (Fig.~\ref{fig:bully-timeouts} e Tabela~\ref{tab:timeouts}). Ao variar $E$ de 200 para 1000\,ms, a eleição média aumenta de 0,2016 para 1,0012\,s e o \textit{failover} de 0,7631 para 1,5627\,s. Ao variar $T$ de 400 para 1200\,ms, mantendo $E=500$\,ms, a eleição permanece próxima de 0,501\,s, enquanto o \textit{failover} sobe de 0,9305 para 1,6520\,s. Não avaliamos aqui a variação do tempo de espera por COORDINATOR.
+
+\begin{figure*}[t]
+\centering
+\resfig[0.85\textwidth]{bully-timeouts.pdf}
+\caption{Efeito dos timeouts com $N=5$, em Docker. Linha superior: variação de $E$ (ANSWER); inferior: variação de $T$ (heartbeat). Colunas: eleição e failover. Cada ponto representa três ensaios; barras mostram $\pm1$ DP, não intervalos de confiança.}
+\label{fig:bully-timeouts}
+\end{figure*}
+
+\begin{table}[t]
+\centering
+\caption{Efeito dos timeouts (ms) nos tempos (s), $N=5$. Três repetições por configuração.}
+\label{tab:timeouts}
+\footnotesize
+\begin{tabular}{lrrrrr}
+\toprule
+ & & \multicolumn{2}{c}{Eleição ($L_e$)} & \multicolumn{2}{c}{Failover ($L_f$)} \\
+\textbf{Variado} & $n$ & \textbf{Média} & \textbf{DP} & \textbf{Média} & \textbf{DP} \\
+\midrule
+$E=200$ & 3 & 0,2016 & 0,0004 & 0,7631 & 0,0248 \\
+$E=500$ & 3 & 0,5017 & 0,0006 & 1,0639 & 0,0455 \\
+$E=1000$ & 3 & 1,0012 & 0,0005 & 1,5627 & 0,0194 \\
+$T=400$ & 3 & 0,5015 & 0,0004 & 0,9305 & 0,0906 \\
+$T=600$ & 3 & 0,5008 & 0,0001 & 1,0294 & 0,0133 \\
+$T=1200$ & 3 & 0,5015 & 0,0002 & 1,6520 & 0,0453 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+A comparação controlada de mensagens no simulador confirma os dois regimes previstos (Fig.~\ref{fig:bully-messages} e Tabela~\ref{tab:messages}). O melhor caso produziu 3, 5, 7 e 9 envios; o pior, 6, 20, 42 e 72. Todos os 80 ensaios terminaram em acordo em $N-1$, sem erros de \textit{handler}. As dez repetições de cada configuração tiveram contagens idênticas: DP zero e p50 = p95 = p99 = média, como esperado sem perda ou \textit{jitter}. Isso verifica reprodutibilidade no simulador, sem estimar a variabilidade do escalonamento real.
+
+\begin{figure}[t]
+\centering
+\resfig{bully-mensagens.png}
+\caption{Mensagens por substituição do líder no simulador. Notificação imediata apenas em $N-1$ (melhor caso) ou em 1 (pior). São contados todos os envios, inclusive ao nó morto. Dez repetições por ponto, sem variação observada.}
+\label{fig:bully-messages}
+\end{figure}
+
+\begin{table}[t]
+\centering
+\caption{Mensagens enviadas no simulador. E/A/C: ELECTION, ANSWER e COORDINATOR. Valores idênticos nas dez repetições de cada caso.}
+\label{tab:messages}
+\footnotesize
+\begin{tabular}{rcrcr}
+\toprule
+ & \multicolumn{2}{c}{Melhor: detector $N-1$} & \multicolumn{2}{c}{Pior: detector 1} \\
+$N$ & E/A/C & Total & E/A/C & Total \\
+\midrule
+3 & 1/0/2 & 3 & 3/1/2 & 6 \\
+5 & 1/0/4 & 5 & 10/6/4 & 20 \\
+7 & 1/0/6 & 7 & 21/15/6 & 42 \\
+9 & 1/0/8 & 9 & 36/28/8 & 72 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{Eleições espúrias sob perda}
+\label{sec:bully-loss}
+
+Foram executados 40 ensaios adicionais em Docker, com $N=5$, dez sementes por taxa de perda, 5\,s de aquecimento e 30\,s de observação. Mantivemos $\Delta=200$\,ms, $T=600$\,ms, $E=500$\,ms e $C=1000$\,ms, sem adaptação do detector. Não foram injetados crashes, pausas ou reinícios: a perda de 0\%, 5\%, 10\% ou 20\% foi aplicada a todos os tipos de mensagem. Todos os ensaios preservaram os cinco nós em operação, sem erros de handler ou violações do protocolo experimental.
+
+Contamos cada par (nó, election\_id) com evento \evento{election_start} na janela de observação, excluindo startup. São tentativas locais espúrias do sistema, não rodadas globais independentes. Uma falsa suspeita pode gerar tentativas em vários candidatos e novas tentativas ao receber um anúncio de coordenador ainda suspeito. Por isso, a contagem não equivale ao número de falsas suspeitas e pode apresentar rajadas.
+
+Com 20\% de perda, sete dos dez ensaios estavam em acordo no início da janela e nove estavam em acordo ao final. Nas demais taxas, todos estavam em acordo nesses dois instantes. A medição não exige acordo inicial nem final: a instabilidade sob perda contínua é parte do comportamento observado, mesmo sem falhas reais dos nós.
+
+\begin{figure}[t]
+\centering
+\resfig{bully-perdas.pdf}
+\caption{Tentativas locais espúrias por perda, com todos os nós ativos. Média de dez ensaios de 30\,s; faixa indica $\pm1$ DP amostral. Inicialização excluída; perda aplicada também às mensagens de eleição.}
+\label{fig:bully-loss}
+\end{figure}
+
+\begin{table}[t]
+\centering
+\caption{Tentativas locais espúrias por ensaio de 30\,s ($N=5$). Percentis com interpolação linear entre dez sementes.}
+\label{tab:bully-loss}
+\footnotesize
+\begin{tabular}{rrrrrrr}
+\toprule
+\textbf{Perda} & $n$ & \textbf{Média} & \textbf{DP} & \textbf{p50} & \textbf{p95} & \textbf{p99} \\
+\midrule
+0\% & 10 & 0,0 & 0,0 & 0,0 & 0,0 & 0,0 \\
+5\% & 10 & 231,5 & 679,5 & 16,5 & 1207,9 & 1973,6 \\
+10\% & 10 & 1394,9 & 2412,3 & 65,0 & 5454,1 & 6833,2 \\
+20\% & 10 & 7943,5 & 8832,8 & 5998,0 & 22072,3 & 27283,2 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+A Tabela~\ref{tab:bully-loss} registra as médias de tentativas por ensaio (0\%: 0,0, 5\%: 231,5, 10\%: 1394,9, 20\%: 7943,5). Normalizadas pela duração efetivamente observada, as médias são 0,0, 463,0, 2789,8, 15886,9 tentativas por minuto do sistema, respectivamente. A dispersão entre sementes deve ser considerada junto da média. A perda afeta tanto os heartbeats, que originam suspeitas, quanto ANSWER e COORDINATOR, que influenciam repetições e propagação; portanto, não se deve supor uma relação linear entre perda e contagem. Os resultados caracterizam a implementação atual, sem modificações no algoritmo para reduzir as rajadas.
+
+\subsection{Discussão integrada}
+\label{sec:discussao}
+
+A identidade $L_f=L_d+L_e$ explica os resultados: reduzir a espera por ANSWER reduz o tempo de eleição, enquanto reduzir o timeout do detector antecipa seu início. Essa redução pode aumentar falsas suspeitas sob atraso ou perda. A varredura de perdas quantificou as tentativas espúrias resultantes com detector fixo, mas não comparou diferentes timeouts nem o detector adaptativo. A eleição pode ter duração quase constante na faixa medida e ainda apresentar custo quadrático em mensagens; as duas métricas capturam aspectos distintos. Os experimentos Docker medem tempos com detecção concorrente, enquanto o simulador isola o iniciador para comparar os custos extremos.
+
+% =====================================================================
+\section{Limitações}
+\label{sec:limitacoes}
+% =====================================================================
+
+Os contêineres compartilham CPU, memória, kernel e rede do mesmo hospedeiro; não constituem domínios de falha independentes nem representam uma rede de longa distância. O instante do comando Docker não determina exatamente quando o processo deixou de executar. Os \textit{timeouts} foram avaliados com apenas três repetições por nível, o que limita inferências sobre caudas. Na simulação, a notificação controlada do detector e a rede sem variabilidade isolam a complexidade, mas não reproduzem o escalonamento dos contêineres. O Bully não usa quórum: partições podem produzir líderes simultâneos. A varredura de perdas quantifica tentativas espúrias com detector fixo; o benefício do detector adaptativo e a variação dos timeouts sob perda permanecem sem avaliação.
+
+% =====================================================================
+\section{Conclusão}
+\label{sec:conclusao}
+% =====================================================================
+
+A implementação integrou detecção de falhas e eleição de líder com transporte assíncrono, timeouts explícitos e logs verificáveis. Nos 78 ensaios Docker disponíveis, os sobreviventes convergiram para o maior ID vivo; o tempo de eleição foi dominado pela espera por ANSWER, enquanto a detecção e o disparo da falha explicaram a maior parcela da variabilidade do failover. Os 80 ensaios simulados confirmaram custo linear no melhor caso e quadrático no pior. Os 40 ensaios adicionais sob perda quantificaram as tentativas espúrias sem falhas reais e evidenciaram rajadas de reeleição. A comparação com adaptação do detector permanece necessária para caracterizar o compromisso entre rapidez de recuperação e falsas suspeitas.
+
+% =====================================================================
+\section*{Código Reutilizado}
+% =====================================================================
+
+\todo{Fontes de código reutilizado e modificações}
+
+% =====================================================================
+\section*{Divisão de Trabalho}
+% =====================================================================
+
+\begin{itemize}
+\item \textbf{Guilherme Webster Chamoun} (RA 257111): fundação do projeto (configuração, mensagens, logs, transporte UDP com injeção de falhas, simulador), Docker/Compose/Makefile, detector de \textit{heartbeat} e seu verificador, infraestrutura e experimentos do detector, redação.
+  \item \textbf{Gabriel Cunha Marchetti} (RA 251055): eleição Bully, integração com o detector, métricas e experimentos do Bully, redação.
+\end{itemize}
+
+% =====================================================================
+% Referências (não contam no limite de 6 páginas)
+% =====================================================================
+% Adicionar a bibliografia quando as fontes utilizadas forem confirmadas.
+\todo{Adicionar referências bibliográficas e suas citações; referencias.bib não foi fornecido.}
+
+\end{document}
