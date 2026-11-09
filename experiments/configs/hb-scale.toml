@@ -1,22 +1,25 @@
 # Custo em mensagens do heartbeat all-to-all: esperado N(N-1)/intervalo por segundo.
 name = "hb-scale"
-description = "Mensagens de heartbeat por segundo e latência de detecção vs. N"
+description = "Mensagens de heartbeat por segundo vs. N, sem falhas de nós"
 algorithm = "heartbeat"
 seeds = 10
 warmup_s = 5
-duration_s = 20
+duration_s = 12
 
 [base]
 HB_INTERVAL_MS = 200
 HB_TIMEOUT_MS = 600
+HB_ADAPTIVE = false
+HB_TIMEOUT_STEP_MS = 200
+HB_TIMEOUT_MAX_MS = 0
+ELECTION_TIMEOUT_MS = 500
+COORD_TIMEOUT_MS = 1000
+DROP_RATE = 0.0
+DELAY_MS = 0
+JITTER_MS = 0
 
 [sweep]
 N = [3, 5, 7, 9]
-
-[[faults]]
-at_s = 12
-action = "kill"
-target = "max"
 
 [[plots]]
 metric = "heartbeat_rate"
@@ -24,9 +27,3 @@ x = "N"
 reference = "heartbeat_rate"
 xlabel = "Número de nós (N)"
 ylabel = "Heartbeats enviados por segundo"
-
-[[plots]]
-metric = "detection_latency_s"
-x = "N"
-xlabel = "Número de nós (N)"
-ylabel = "Latência de detecção (s)"
