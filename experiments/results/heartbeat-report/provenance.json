@@ -1,0 +1,9 @@
+{
+  "timeout": "experiments/raw/hb-timeout",
+  "scale": "experiments/raw/hb-scale",
+  "loss": "experiments/raw/bully-loss",
+  "loss_reused": true,
+  "loss_measurement": "suspect, não election_start; janela após aquecimento",
+  "system_rate": "false_suspicions * 60 / observation_s",
+  "pair_rate": "system_rate / (N * (N - 1))"
+}

@@ -4,6 +4,14 @@
   "params": {
     "N": 5,
     "HB_INTERVAL_MS": 200,
+    "HB_ADAPTIVE": false,
+    "HB_TIMEOUT_STEP_MS": 200,
+    "HB_TIMEOUT_MAX_MS": 0,
+    "ELECTION_TIMEOUT_MS": 500,
+    "COORD_TIMEOUT_MS": 1000,
+    "DROP_RATE": 0.0,
+    "DELAY_MS": 0,
+    "JITTER_MS": 0,
     "HB_TIMEOUT_MS": 600
   },
   "seed": 8,
@@ -36,10 +44,10 @@
     "commit": "f44920ea93796865676c0d7e4d71f6fd2c8c8f34",
     "dirty": true
   },
-  "started_at": 1793993497.4528909,
+  "started_at": 1794256693.1537755,
   "complete": true,
-  "all_up_ts": 1793993500.7665665,
-  "measure_start_ts": 1793993505.7666404,
-  "measure_end_ts": 1793993533.7667255,
-  "finished_at": 1793993535.5543587
+  "all_up_ts": 1794256693.9892333,
+  "measure_start_ts": 1794256698.9895184,
+  "measure_end_ts": 1794256726.989868,
+  "finished_at": 1794256727.3894756
 }

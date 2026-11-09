@@ -1,4 +1,4 @@
-{"ts":1793993472.427557701,"event":"fault","action":"kill","target":5,"issued_ts":1793993471.848613102,"cmd_ms":578.9}
-{"ts":1793993479.707661799,"event":"fault","action":"start","target":5,"issued_ts":1793993478.854844668,"cmd_ms":852.8}
-{"ts":1793993486.466261535,"event":"fault","action":"kill","target":1,"issued_ts":1793993485.846469173,"cmd_ms":619.8}
-{"ts":1793993493.416593279,"event":"fault","action":"start","target":1,"issued_ts":1793993492.849124941,"cmd_ms":567.5}
+{"ts":1794256668.835746258,"event":"fault","action":"kill","target":5,"issued_ts":1794256668.530850822,"cmd_ms":304.9}
+{"ts":1794256675.653009526,"event":"fault","action":"start","target":5,"issued_ts":1794256675.530827874,"cmd_ms":122.2}
+{"ts":1794256682.661966855,"event":"fault","action":"kill","target":1,"issued_ts":1794256682.531099716,"cmd_ms":130.9}
+{"ts":1794256689.654125912,"event":"fault","action":"start","target":1,"issued_ts":1794256689.531073620,"cmd_ms":123.1}

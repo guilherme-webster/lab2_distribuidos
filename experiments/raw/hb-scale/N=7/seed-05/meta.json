@@ -4,27 +4,29 @@
   "params": {
     "HB_INTERVAL_MS": 200,
     "HB_TIMEOUT_MS": 600,
+    "HB_ADAPTIVE": false,
+    "HB_TIMEOUT_STEP_MS": 200,
+    "HB_TIMEOUT_MAX_MS": 0,
+    "ELECTION_TIMEOUT_MS": 500,
+    "COORD_TIMEOUT_MS": 1000,
+    "DROP_RATE": 0.0,
+    "DELAY_MS": 0,
+    "JITTER_MS": 0,
     "N": 7
   },
   "seed": 5,
   "n": 7,
   "warmup_s": 5.0,
-  "duration_s": 20.0,
-  "faults_planned": [
-    {
-      "at_s": 12.0,
-      "action": "kill",
-      "target": 7
-    }
-  ],
+  "duration_s": 12.0,
+  "faults_planned": [],
   "git": {
     "commit": "f44920ea93796865676c0d7e4d71f6fd2c8c8f34",
     "dirty": true
   },
-  "started_at": 1793998550.295074,
+  "started_at": 1794257305.2768228,
   "complete": true,
-  "all_up_ts": 1793998554.1948996,
-  "measure_start_ts": 1793998559.195313,
-  "measure_end_ts": 1793998579.1954603,
-  "finished_at": 1793998583.4027479
+  "all_up_ts": 1794257306.1700723,
+  "measure_start_ts": 1794257311.1701384,
+  "measure_end_ts": 1794257323.1703598,
+  "finished_at": 1794257323.7182226
 }
