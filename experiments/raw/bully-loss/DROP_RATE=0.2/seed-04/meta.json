@@ -1,0 +1,32 @@
+{
+  "experiment": "bully-loss",
+  "config": "DROP_RATE=0.2",
+  "params": {
+    "N": 5,
+    "HB_INTERVAL_MS": 200,
+    "HB_TIMEOUT_MS": 600,
+    "HB_ADAPTIVE": false,
+    "HB_TIMEOUT_STEP_MS": 200,
+    "HB_TIMEOUT_MAX_MS": 0,
+    "ELECTION_TIMEOUT_MS": 500,
+    "COORD_TIMEOUT_MS": 1000,
+    "DELAY_MS": 0,
+    "JITTER_MS": 0,
+    "DROP_RATE": 0.2
+  },
+  "seed": 4,
+  "n": 5,
+  "warmup_s": 5.0,
+  "duration_s": 30.0,
+  "faults_planned": [],
+  "git": {
+    "commit": "f44920ea93796865676c0d7e4d71f6fd2c8c8f34",
+    "dirty": true
+  },
+  "started_at": 1794254556.3053703,
+  "complete": true,
+  "all_up_ts": 1794254557.146167,
+  "measure_start_ts": 1794254562.1464694,
+  "measure_end_ts": 1794254592.1465762,
+  "finished_at": 1794254592.9009564
+}
