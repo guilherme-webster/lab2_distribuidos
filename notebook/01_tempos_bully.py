@@ -100,3 +100,5 @@ plt.show()
 # ao início da eleição. Uma eleição próxima de ELECTION_TIMEOUT_MS sugere
 # predominância da espera por ANSWER, mesmo sem aumento visível com N.
 # As conclusões se limitam à configuração e à máquina usadas no experimento.
+
+# %%
