@@ -1,0 +1,72 @@
+{
+  "experiment": "bully-messages-sim",
+  "backend": "FakeNetwork/FakeClock",
+  "N": 9,
+  "case": "worst",
+  "seed": 7,
+  "initiator": 1,
+  "warmup_s": 10,
+  "duration_s": 8,
+  "delay_ms": 5,
+  "jitter_ms": 0,
+  "drop_rate": 0,
+  "other_detector_callback_delay_s": 2,
+  "node_configs": {
+    "1": {
+      "HB_TIMEOUT_MS": 600,
+      "HB_INTERVAL_MS": 200,
+      "ELECTION_TIMEOUT_MS": 500,
+      "COORD_TIMEOUT_MS": 1000
+    },
+    "2": {
+      "HB_TIMEOUT_MS": 600,
+      "HB_INTERVAL_MS": 200,
+      "ELECTION_TIMEOUT_MS": 500,
+      "COORD_TIMEOUT_MS": 1000
+    },
+    "3": {
+      "HB_TIMEOUT_MS": 600,
+      "HB_INTERVAL_MS": 200,
+      "ELECTION_TIMEOUT_MS": 500,
+      "COORD_TIMEOUT_MS": 1000
+    },
+    "4": {
+      "HB_TIMEOUT_MS": 600,
+      "HB_INTERVAL_MS": 200,
+      "ELECTION_TIMEOUT_MS": 500,
+      "COORD_TIMEOUT_MS": 1000
+    },
+    "5": {
+      "HB_TIMEOUT_MS": 600,
+      "HB_INTERVAL_MS": 200,
+      "ELECTION_TIMEOUT_MS": 500,
+      "COORD_TIMEOUT_MS": 1000
+    },
+    "6": {
+      "HB_TIMEOUT_MS": 600,
+      "HB_INTERVAL_MS": 200,
+      "ELECTION_TIMEOUT_MS": 500,
+      "COORD_TIMEOUT_MS": 1000
+    },
+    "7": {
+      "HB_TIMEOUT_MS": 600,
+      "HB_INTERVAL_MS": 200,
+      "ELECTION_TIMEOUT_MS": 500,
+      "COORD_TIMEOUT_MS": 1000
+    },
+    "8": {
+      "HB_TIMEOUT_MS": 600,
+      "HB_INTERVAL_MS": 200,
+      "ELECTION_TIMEOUT_MS": 500,
+      "COORD_TIMEOUT_MS": 1000
+    },
+    "9": {
+      "HB_TIMEOUT_MS": 600,
+      "HB_INTERVAL_MS": 200,
+      "ELECTION_TIMEOUT_MS": 500,
+      "COORD_TIMEOUT_MS": 1000
+    }
+  },
+  "counting": "Todos os envios ELECTION/ANSWER/COORDINATOR após o crash, inclusive ao nó morto",
+  "complete": true
+}
