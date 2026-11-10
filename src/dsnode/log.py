@@ -1,7 +1,8 @@
 """Log de eventos estruturados: um objeto JSON por linha.
 
-Esses logs são a evidência de correção (scripts/check_*.py) e a fonte das
-métricas dos experimentos; os nomes dos eventos fazem parte do contrato.
+Esses logs são a evidência de correção (scripts/check_heartbeat.py e
+scripts/bully_metrics.py) e a fonte das métricas dos experimentos; os nomes
+dos eventos fazem parte do contrato.
 """
 
 import json

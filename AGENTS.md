@@ -68,7 +68,7 @@ Parâmetros dos algoritmos e da injeção de falhas vão pelo ambiente do host:
 |---|---|
 | `config.py`, `messages.py`, `log.py`, `transport.py`, `tests/sim.py`, Docker/compose/Makefile | Guilherme |
 | `heartbeat.py`, `check_heartbeat.py`, `faults.sh`, `run_experiment.py`, `collect_env.sh` | Guilherme |
-| `bully.py`, `check_bully.py`, integração em `node.py` | Colega |
+| `bully.py`, `bully_metrics.py`, integração em `node.py` | Colega |
 
 Os contratos (assinaturas e nomes de eventos de log) estão na Seção 3 do `PLANEJAMENTO.md`. **Não altere um contrato sem avisar o usuário**, porque o outro integrante depende dele. Mudanças no módulo do colega devem ser pontuais e explicitadas na resposta.
 
@@ -78,7 +78,7 @@ Os contratos (assinaturas e nomes de eventos de log) estão na Seção 3 do `PLA
 - Toda aleatoriedade usa `random.Random` semeado a partir de `SEED` (e `NODE_ID`); nunca `random` global. Experimentos precisam ser reprodutíveis.
 - Toda configuração vem de variáveis de ambiente lidas em `config.py`; nada de constantes mágicas espalhadas. O mesmo código deve rodar local e na nuvem do IC mudando só configuração.
 - Use relógio monotônico (`time.monotonic`) para timeouts; o relógio é injetado (`clock`) para que os testes usem `FakeClock`.
-- **Logs são evidência de correção:** emita eventos JSON de uma linha com os nomes definidos no plano (`suspect`, `restore`, `election_start`, `leader_change`, `msg_send`, ...). Não renomeie eventos sem atualizar os verificadores em `scripts/check_*.py`.
+- **Logs são evidência de correção:** emita eventos JSON de uma linha com os nomes definidos no plano (`suspect`, `restore`, `election_start`, `leader_change`, `msg_send`, ...). Não renomeie eventos sem atualizar os verificadores (`scripts/check_heartbeat.py` e `scripts/bully_metrics.py`).
 - Lógica dos algoritmos não depende de Docker: tem que ser testável com `FakeTransport` em memória.
 - Comentários e docstrings em português, curtos; nomes de identificadores em inglês.
 

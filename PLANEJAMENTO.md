@@ -24,7 +24,7 @@ Além disso, eles se integram naturalmente: o detector de heartbeat é quem perc
 | Timeouts explícitos | Todo `await` de rede com timeout; timeouts do Bully e do detector configuráveis via env | 1–2 |
 | Não usar biblioteca que já implemente o algoritmo | Transporte "cru" (asyncio UDP); detector e eleição escritos do zero | — |
 | Modelo do sistema declarado e justificado (tempo, canais, falhas, relógios/persistência, safety/liveness) | Seção 5 deste plano → vira seção do relatório | 1–2 |
-| Correção demonstrada por testes automatizados ou verificação reproduzível de logs | Testes unitários (simulador determinístico) + verificador de logs JSON (`scripts/check_*.py`) | 1–3 |
+| Correção demonstrada por testes automatizados ou verificação reproduzível de logs | Testes unitários (simulador determinístico) + verificação de logs JSON (`scripts/check_heartbeat.py`; `scripts/bully_metrics.py` nos experimentos do Bully) | 1–3 |
 | `compose.yaml` + comandos documentados p/ construir, iniciar, testar e remover | `Makefile` (`build`, `up`, `test`, `down`, `experiments`) + README | 0, 5 |
 | Falhas repetíveis, com scripts e sementes registradas | Injeção na aplicação (perda/atraso com `SEED`) + `docker kill/stop/start/pause`; seed gravada em cada execução | 0, 4 |
 | Por algoritmo: ≥1 cenário normal e ≥1 de falha | Ver Seção 6 | 4 |
@@ -74,7 +74,8 @@ scripts/
   gen_compose.py   # compose para N nós
   faults.sh        # kill/stop/start/pause de nós
   run_experiment.py# roda cenário × parâmetros × seeds, salva logs brutos + meta.json
-  check_heartbeat.py / check_bully.py   # verificadores de propriedades sobre logs
+  check_heartbeat.py # verificador das propriedades do detector sobre logs
+  bully_metrics.py # acordo inicial/final e tempos do Bully em cada ensaio
   analyze.py       # métricas, percentis, gráficos
   collect_env.sh   # hardware, SO, versões
 experiments/
@@ -171,7 +172,7 @@ A divisão segue a dependência: **Guilherme começa pela fundação + heartbeat
    - `node.py` liga `FailureDetector.on_suspect(leader)` → `Bully.start_election()`
    - teste de integração no simulador e no compose
 3. **Verificação e experimentos do Bully**
-   - `scripts/check_bully.py`
+   - `scripts/bully_metrics.py` (acordo inicial e final em cada ensaio)
    - cenários e varredura de N usando o `run_experiment.py`
 4. **Relatório:** modelo de sistema do Bully, propriedades de correção, resultados do Bully, discussão de partição/split-brain.
 
@@ -245,7 +246,7 @@ Cada execução grava em `experiments/raw/...`: `logs.jsonl` (todos os nós), `m
 | Data | Guilherme | Colega |
 |---|---|---|
 | **03–04/11** | Fundação: contratos, `sim.py`, `config/messages/log`, transporte UDP, Dockerfile, compose, Makefile. Push o quanto antes. | Estuda Bully (van Steen & Tanenbaum, cap. 5), escreve modelo do sistema do Bully, começa `bully.py` contra `FakeTransport`. |
-| **05–06/11** | Heartbeat + testes + `check_heartbeat.py`; `faults.sh`. | Bully + testes unitários (B1–B4) + `check_bully.py`. |
+| **05–06/11** | Heartbeat + testes + `check_heartbeat.py`; `faults.sh`. | Bully + testes unitários (B1–B4). |
 | **07/11** | `run_experiment.py`, `collect_env.sh`, `analyze.py` (esqueleto). | Integração em `node.py` (I1), teste no compose. |
 | **08–09/11** | Experimentos do heartbeat + gráficos. | Experimentos do Bully + gráficos; cenário P1 (bônus) se der tempo. |
 | **09–11/11** | Relatório: arquitetura, heartbeat, falhas. | Relatório: Bully, integração, correção. |
