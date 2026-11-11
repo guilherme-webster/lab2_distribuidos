@@ -1,5 +1,7 @@
 # MC714 — Detector de falhas e eleição de líder
 
+AVISO: A cópia do relatório está presente dentro de report/relatorio.pdf
+
 Trabalho 2 de Sistemas Distribuídos. Implementação de um
 detector de falhas por **heartbeat** integrado à eleição de líder **Bully**:
 quando o detector suspeita do líder, uma eleição escolhe o maior ID vivo.
